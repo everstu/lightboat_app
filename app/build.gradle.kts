@@ -11,8 +11,8 @@ android {
         applicationId = "com.lightboat.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
     }
 
     compileOptions {
@@ -21,6 +21,18 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { viewBinding = true }
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("signing/lightboat-debug.p12")
+            storeType = "PKCS12"
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+    buildTypes {
+        getByName("debug") { signingConfig = signingConfigs.getByName("debug") }
+    }
     lint { abortOnError = true }
 }
 

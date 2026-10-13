@@ -29,6 +29,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.RenderProcessGoneDetail
 import android.widget.Toast
+import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -40,6 +41,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import androidx.webkit.WebMessageCompat
 import com.lightboat.app.databinding.ActivityMainBinding
 import com.lightboat.app.databinding.ItemProfileBinding
 import com.lightboat.app.databinding.DialogBrowserMenuBinding
@@ -48,6 +50,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import java.util.UUID
 import java.util.concurrent.Executors
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -67,6 +70,7 @@ class MainActivity : AppCompatActivity() {
     private var scanTarget: ScanTarget? = null
     private var nativeDialog: Dialog? = null
     private lateinit var defaultUserAgent: String
+    private lateinit var fullscreenPlayer: FullscreenPlayer
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
     private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
@@ -102,11 +106,24 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        fullscreenPlayer = FullscreenPlayer(this, binding.root) { updateChrome() }
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
-            val bars = insets.getInsets(if (screen == Screen.BROWSER) WindowInsetsCompat.Type.displayCutout()
-                else WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
-            view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard.bottom))
+            if (screen == Screen.BROWSER) {
+                // The webpage fills the physical screen, including the cutout area.
+                view.setPadding(0, 0, 0, keyboard.bottom)
+            } else {
+                view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard.bottom))
+            }
+            // Only interactive native controls avoid the notch; do not inset the WebView.
+            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            val menuBounds = binding.menuLayer.layoutParams as FrameLayout.LayoutParams
+            if (menuBounds.leftMargin != cutout.left || menuBounds.topMargin != cutout.top ||
+                menuBounds.rightMargin != cutout.right || menuBounds.bottomMargin != cutout.bottom) {
+                menuBounds.setMargins(cutout.left, cutout.top, cutout.right, cutout.bottom)
+                binding.menuLayer.layoutParams = menuBounds
+            }
             insets
         }
         store = ConfigStore(this)
@@ -134,6 +151,7 @@ class MainActivity : AppCompatActivity() {
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (fullscreenPlayer.isActive) { fullscreenPlayer.hide(); return }
                 when (screen) {
                     Screen.EDITOR -> showProfiles()
                     Screen.PROFILES -> if (pageReady && webView != null) returnToPage() else confirmExit()
@@ -183,16 +201,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateChrome() {
         if (!::binding.isInitialized) return
-        val immersive = screen == Screen.BROWSER && scanTarget == null && nativeDialog == null
+        val immersive = fullscreenPlayer.isActive ||
+            (screen == Screen.BROWSER && scanTarget == null && nativeDialog == null)
+        binding.menuLayer.visibility = if (screen == Screen.BROWSER && !fullscreenPlayer.isActive) View.VISIBLE else View.GONE
         WindowCompat.getInsetsController(window, binding.root).apply {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             if (immersive) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes = window.attributes.apply {
-                layoutInDisplayCutoutMode = if (screen == Screen.BROWSER)
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                layoutInDisplayCutoutMode = when {
+                    screen != Screen.BROWSER -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    else -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
             }
         }
         ViewCompat.requestApplyInsets(binding.root)
@@ -449,6 +471,14 @@ class MainActivity : AppCompatActivity() {
         }
         CookieManager.getInstance().setAcceptCookie(true)
         view.webChromeClient = object : WebChromeClient() {
+            override fun onShowCustomView(customView: View, callback: WebChromeClient.CustomViewCallback) {
+                if (view !== webView || screen != Screen.BROWSER) { callback.onCustomViewHidden(); return }
+                hideKeyboard()
+                fullscreenPlayer.show(customView, callback)
+            }
+
+            override fun onHideCustomView() { fullscreenPlayer.hide() }
+
             override fun onProgressChanged(view: WebView, progress: Int) {
                 if (view !== webView || pageFailed) return
                 binding.pageProgress.progress = progress
@@ -464,6 +494,8 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 if (view !== webView) return
+                fullscreenPlayer.hide()
+                (view as AppWebView).clearClipboardGesture()
                 pageFailed = false
                 binding.pageProgress.visibility = View.VISIBLE
             }
@@ -503,7 +535,28 @@ class MainActivity : AppCompatActivity() {
         }
         // Register separate scripts so a syntax error in supplied JS cannot disable the guard.
         // Wildcard deliberately covers redirects, subsequent navigation and child frames.
+        WebViewCompat.addWebMessageListener(view, "LightboatClipboard", setOf("*")) { sender, message, origin, _, reply ->
+            if (sender !== webView || message.type != WebMessageCompat.TYPE_STRING) return@addWebMessageListener
+            val payload = runCatching { JSONObject(message.data.orEmpty()) }.getOrNull() ?: return@addWebMessageListener
+            val id = payload.optString("id")
+            if (id.isEmpty() || id.length > 64) return@addWebMessageListener
+            val response = JSONObject().put("id", id)
+            try {
+                val secure = origin.scheme == "https" || (origin.scheme == "http" &&
+                    origin.host in setOf("localhost", "127.0.0.1", "[::1]", "::1"))
+                check(secure && screen == Screen.BROWSER && view.isShown && hasWindowFocus() && view.consumeClipboardGesture()) {
+                    "复制需要在当前网页中点击操作"
+                }
+                val text = payload.getString("text")
+                require(text.length <= 65536) { "复制文本过长" }
+                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                    .setPrimaryClip(ClipData.newPlainText(getString(R.string.app_name), text))
+            } catch (error: Exception) { response.put("error", error.message ?: "无法复制") }
+            reply.postMessage(response.toString())
+        }
+        val clipboardSupport = assets.open("clipboard-support.js").bufferedReader().use { it.readText() }
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, guard, setOf("*"))
+        scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupport, setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, script, setOf("*"))
         showLoading(R.string.loading_page)
         view.loadUrl(profile.url)
@@ -517,6 +570,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun failPage(message: String) {
+        fullscreenPlayer.hide()
         pageFailed = true
         pageReady = false
         webView?.stopLoading()
@@ -597,6 +651,7 @@ class MainActivity : AppCompatActivity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     private fun destroyWebView() {
+        fullscreenPlayer.hide()
         scriptHandlers.forEach { runCatching { it.remove() } }
         scriptHandlers.clear()
         webView?.let { view ->

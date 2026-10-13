@@ -35,10 +35,13 @@ jobs:
         run: |
           node tests/native-guard.test.cjs
           node --test tests/fetch-script.test.cjs
+          node --test tests/clipboard-support.test.cjs
       - name: Build, test and lint debug APK
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - name: Verify fixed debug signing certificate
+        run: python3 scripts/verify_debug_signature.py
       - name: Prepare release attachment
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -51,7 +54,7 @@ jobs:
           name: Lightboat ${{ github.ref_name }}
           generate_release_notes: true
           body: |
-            Android debug APK. Uses Android's default debug signing; no custom signing keys are required.
+            Android debug APK. Uses the fixed repository debug certificate for upgrade installation; no signing secrets are required.
             Android 8.0 or later and a WebView supporting document-start injection are required.
           files: release-assets/*.apk
           fail_on_unmatched_files: true

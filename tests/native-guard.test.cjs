@@ -41,13 +41,15 @@ function harness(rootPresent) {
 }
 function test(name, body) { body(); passed++; console.log(`PASS ${name}`); }
 
-test('Blocks selection, clipboard, context menus and drag events', () => {
+test('Blocks browser menus, selection, cut and paste while allowing web copy handlers', () => {
   const h = harness(true);
-  for (const type of ['contextmenu', 'selectstart', 'dragstart', 'copy', 'cut', 'paste']) {
+  for (const type of ['contextmenu', 'selectstart', 'dragstart', 'cut', 'paste']) {
     const event = h.dispatch(type);
     assert.equal(event.prevented, true, type);
     assert.equal(event.stopped, true, type);
   }
+  assert.equal(h.listeners.has('copy'), false);
+  assert.equal(h.dispatch('copy').prevented, false);
 });
 test('Works before the document root exists', () => {
   const h = harness(false);
@@ -64,11 +66,12 @@ test('Retains ordinary typing, touch scrolling and link clicks', () => {
   assert.match(h.styles[0].textContent, /input, textarea, \[contenteditable\]/);
   assert.match(h.styles[0].textContent, /user-select: text/);
 });
-test('Blocks clipboard keyboard shortcuts and paste insertion events', () => {
+test('Allows copy shortcuts while still blocking paste and cut', () => {
   const h = harness(true);
-  for (const key of ['c', 'v', 'x', 'a', 'Insert']) {
+  for (const key of ['v', 'x', 'a']) {
     assert.equal(h.dispatch('keydown', { key, ctrlKey: true }).prevented, true);
   }
+  for (const key of ['c', 'Insert']) assert.equal(h.dispatch('keydown', { key, ctrlKey: true }).prevented, false);
   assert.equal(h.dispatch('keydown', { key: 'v', metaKey: true }).prevented, true);
   assert.equal(h.dispatch('keydown', { key: 'Insert', shiftKey: true }).prevented, true);
   for (const inputType of ['insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromDrop']) {

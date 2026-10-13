@@ -4,7 +4,7 @@
     event.preventDefault();
     event.stopImmediatePropagation();
   };
-  for (const type of ['contextmenu', 'selectstart', 'dragstart', 'copy', 'cut', 'paste']) {
+  for (const type of ['contextmenu', 'selectstart', 'dragstart', 'cut', 'paste']) {
     window.addEventListener(type, stop, { capture: true, passive: false });
   }
   // Some keyboards insert clipboard content via beforeinput instead of paste.
@@ -15,7 +15,7 @@
   }, { capture: true, passive: false });
   window.addEventListener('keydown', event => {
     const key = event.key.toLowerCase();
-    if (((event.ctrlKey || event.metaKey) && ['a', 'c', 'v', 'x', 'insert'].includes(key)) ||
+    if (((event.ctrlKey || event.metaKey) && ['a', 'v', 'x'].includes(key)) ||
         (event.shiftKey && ['insert', 'delete'].includes(key))) stop(event);
   }, { capture: true, passive: false });
   const style = document.createElement('style');

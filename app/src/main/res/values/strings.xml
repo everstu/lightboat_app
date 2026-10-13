@@ -37,7 +37,7 @@
     <string name="script_label">注入脚本地址</string>
     <string name="script_hint">https://example.com/app.js</string>
     <string name="script_help">填写可直接下载的 JavaScript 文件地址。</string>
-    <string name="setup_note">脚本准备完成后才打开网页。浏览时关闭长按菜单、文字选择和复制粘贴。</string>
+    <string name="setup_note">脚本准备完成后才打开网页。保留网页复制按钮和播放器全屏，关闭长按菜单、正文选择和粘贴。</string>
     <string name="open_app">开始浏览</string>
     <string name="save_open">保存并打开</string>
     <string name="cancel">返回浏览</string>
@@ -82,4 +82,5 @@
     <string name="open_system_settings">打开系统设置</string>
     <string name="user_agent_label">请求 User-Agent（UA）</string>
     <string name="reset_user_agent">恢复安卓手机默认 UA</string>
+    <string name="exit_player_fullscreen">退出播放器全屏</string>
 </resources>
