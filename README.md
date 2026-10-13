@@ -75,8 +75,8 @@ UA 最长 2048 字符，使用可打印 ASCII，不接受换行和控制字符�
 
 1. 读取最后使用的配置，检查 WebView 功能支持。
 2. 通过浏览器获取 JS 文本；有效 HTTP 缓存可以直接命中，过期时按服务器规则验证/更新。
-3. 先注册网页交互限制脚本，再通过 `WebViewCompat.addDocumentStartJavaScript` 注册原文 JS。
-4. 注册完成后调用 `loadUrl()`；每个文档开始加载时，在页面自身 JS 执行前运行注入脚本。
+3. 解析用户脚本头，预加载 require/resource，再注册交互限制和用户脚本运行器。
+4. 注册完成后调用 `loadUrl()`。普通 JS 在 document-start 执行；油猴格式脚本按 run-at 调度，默认 document-idle，并遵循 match/exclude/noframes。
 
 **缓存命中取决于服务器响应头**，无法保证每次免网络请求。`Cache-Control: no-store` 不缓存，`no-cache` 要求验证，带有效 `max-age` 的资源可直接复用。建议服务器使用 `Cache-Control`、`ETag`/`Last-Modified` 控制更新；长期缓存的脚本可使用版本化 URL。网页使用 `WebSettings.LOAD_DEFAULT`，不强行展示过期内容。
 
@@ -84,7 +84,7 @@ UA 最长 2048 字符，使用可打印 ASCII，不接受换行和控制字符�
 
 用户脚本不会在加载页执行，只传回文本。传递脚本文本的 WebMessage 接口仅存在于临时加载页，限制到该脚本 origin。正式浏览页另有只写文本的剪贴板接口，用于支持网页复制按钮；不开放剪贴板读取。
 
-注入覆盖后续导航、跨域跳转和 iframe；每个新文档执行一次，单页应用的同文档路由不重复注入。切换配置销毁旧浏览页及其注入脚本。设备不支持提前注入时提示更新 Android System WebView / Chrome，不降级到网页加载后的注入。
+运行器覆盖后续导航、跨域跳转和 iframe，按脚本声明筛选；每个匹配的新文档执行一次，单页应用的同文档路由不重复注入。切换配置销毁旧浏览页、脚本命令和未完成的 GM 请求。设备不支持提前注册运行器时提示更新 Android System WebView / Chrome。
 
 document-start 时 DOM 可能尚未创建。需要操作元素时，用户 JS 可以采用以下模式；注册监听或拦截网络可直接在顶部执行：
 
@@ -99,7 +99,15 @@ if (document.readyState === 'loading') {
 }
 ```
 
-提前注入保证执行时序，用户脚本的语法和逻辑仍需正确。脚本顶层同步计算会阻塞页面加载。
+普通 JS 的提前注入保证执行时序，用户脚本的语法和逻辑仍需正确。需要原生存储快照的 document-start 脚本会先等待 GM 握手。脚本顶层同步计算会阻塞页面加载。
+
+## 油猴格式用户脚本
+
+内置运行器支持 `@match`/`@include`/`@exclude`/`@noframes`、四种 `@run-at`、`@require`/`@resource`、`@grant`、`@connect` 和常用 `GM_*`/`GM.*`：持久存储、值变更监听、样式/元素、资源、脚本菜单、跨域 HTTP、文本剪贴板、日志和应用内提示。带脚本头但未指定时机默认 document-idle，解决需要 head/body 的脚本过早启动问题。
+
+悬浮菜单新增 **脚本命令** 和 **脚本日志**，不用退出网页即可执行脚本注册的命令或查看报错。GM 存储按配置与脚本身份隔离，独立于网页 localStorage；依赖资源继续使用 WebView 缓存，不额外保存脚本文件。
+
+WebView 运行器不是浏览器扩展，完整接口、边界和未实现能力见 [用户脚本兼容表](docs/userscript-compatibility.md)。尤其不能把原生跨域接口视为任意网页权限；只向声明 grant/connect 的可信脚本开放，不具备油猴扩展的安全隔离世界。
 
 ## 浏览体验与范围
 
@@ -123,6 +131,7 @@ if (document.readyState === 'loading') {
 node tests/native-guard.test.cjs
 node --test tests/fetch-script.test.cjs
 node --test tests/clipboard-support.test.cjs
+node --test tests/userscript-runtime.test.cjs
 ```
 
 Android 编译、Lint、Kotlin 测试由 GitHub Actions 执行。真机验收重点：
@@ -138,5 +147,6 @@ Android 编译、Lint、Kotlin 测试由 GitHub Actions 执行。真机验收重
 9. UA 默认值可改可恢复，JSON 往返保留 UA，旧 JSON 可导入；服务器观察网页和 JS 请求头。
 10. HTTPS 网页的 `navigator.clipboard.writeText()` 和旧式复制按钮有效；无用户点击的脚本复制失败。
 11. 视频全屏切横屏；播放器退出、应用关闭按钮和 Android 返回键均恢复原方向且不重载网页；检查跨域 iframe 播放器、暂停/恢复及全屏中页面跳转。
+12. 油猴脚本无 run-at 时等 DOM 就绪；match/exclude/noframes 正常，require/resource 准备正确，GM 存储重启后保留，命令和日志可查看。
 
 参考：[提前注入接口](https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)) · [WebView HTTP(S) base URL](https://developer.android.com/reference/android/webkit/WebView#loadDataWithBaseURL(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String))。

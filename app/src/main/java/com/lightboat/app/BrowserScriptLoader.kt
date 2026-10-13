@@ -26,6 +26,15 @@ class BrowserScriptLoader(
 
     @SuppressLint("SetJavaScriptEnabled")
     fun load(url: String, userAgent: String, callback: (Result<String>) -> Unit) {
+        loadInternal(url, userAgent, "script") { result -> callback(result.map { it.getString("script") }) }
+    }
+
+    fun loadAsset(url: String, userAgent: String, resource: Boolean, callback: (Result<JSONObject>) -> Unit) {
+        loadInternal(url, userAgent, if (resource) "resource" else "require", callback)
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun loadInternal(url: String, userAgent: String, mode: String, callback: (Result<JSONObject>) -> Unit) {
         close()
         val parsed = URI(url)
         val origin = URI(parsed.scheme.lowercase(), null, parsed.host.lowercase(), parsed.port, null, null, null).toString()
@@ -43,7 +52,7 @@ class BrowserScriptLoader(
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             blockNetworkImage = true
         }
-        fun finish(result: Result<String>) {
+        fun finish(result: Result<JSONObject>) {
             if (view !== loader) return
             close()
             callback(result)
@@ -64,7 +73,7 @@ class BrowserScriptLoader(
             val result = runCatching {
                 val payload = JSONObject(message.data ?: error("脚本数据为空"))
                 if (payload.has("error")) error(payload.getString("error"))
-                payload.getString("script")
+                payload
             }
             finish(result)
         }
@@ -73,7 +82,7 @@ class BrowserScriptLoader(
         val fetchCode = context.assets.open("fetch-script.js").bufferedReader().use { it.readText() }
         val quotedUrl = JSONObject.quote(url).replace("<", "\\u003c")
         val html = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body>" +
-            "<script>const scriptUrl=$quotedUrl;\n$fetchCode</script></body></html>"
+            "<script>const scriptUrl=$quotedUrl;const assetMode=${JSONObject.quote(mode)};\n$fetchCode</script></body></html>"
         // HTTP(S) base URL gives this private helper the script origin for same-origin fetch.
         loader.loadDataWithBaseURL("$origin/", html, "text/html", "UTF-8", null)
     }

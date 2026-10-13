@@ -51,3 +51,28 @@ test('Reports browser network or CORS errors', async () => {
   assert.equal(messages.length, 1);
   assert.equal(messages[0].error, 'Failed to fetch');
 });
+
+test('Preloads binary resource without JS MIME restriction and includes base64 bytes', async () => {
+  const messages = [];
+  const bytes = new Uint8Array([0, 255, 128, 65]);
+  await vm.runInNewContext(source, {
+    scriptUrl, assetMode: 'resource', TextDecoder, Uint8Array,
+    btoa: text => Buffer.from(text, 'binary').toString('base64'),
+    LightboatLoader: { postMessage: text => messages.push(JSON.parse(text)) },
+    fetch: async () => new Response(bytes, { headers: { 'Content-Type': 'image/png' } })
+  });
+  assert.equal(messages[0].mime, 'image/png');
+  assert.deepEqual([...Buffer.from(messages[0].base64, 'base64')], [...bytes]);
+});
+
+test('Required JS assets are returned as text plus bytes for integrity verification', async () => {
+  const messages = [];
+  await vm.runInNewContext(source, {
+    scriptUrl, assetMode: 'require', TextDecoder, Uint8Array,
+    btoa: text => Buffer.from(text, 'binary').toString('base64'),
+    LightboatLoader: { postMessage: text => messages.push(JSON.parse(text)) },
+    fetch: async () => new Response('window.lib=true;', { headers: { 'Content-Type': 'application/javascript' } })
+  });
+  assert.equal(messages[0].text, 'window.lib=true;');
+  assert.equal(Buffer.from(messages[0].base64, 'base64').toString(), messages[0].text);
+});

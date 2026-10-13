@@ -51,4 +51,5 @@ class AppWebView(context: Context) : WebView(context) {
     }
 
     fun clearClipboardGesture() { clipboardGestureAt = -1L }
+    fun markClipboardGesture() { clipboardGestureAt = SystemClock.elapsedRealtime() }
 }

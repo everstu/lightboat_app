@@ -12,6 +12,10 @@
         style="?attr/borderlessButtonStyle" android:text="@string/refresh" android:textColor="@color/accent" />
     <Button android:id="@+id/menuSettings" android:layout_width="match_parent" android:layout_height="52dp"
         style="?attr/borderlessButtonStyle" android:text="@string/manage_configurations" android:textColor="@color/accent" />
+    <Button android:id="@+id/menuScriptCommands" android:layout_width="match_parent" android:layout_height="48dp"
+        style="?attr/borderlessButtonStyle" android:text="@string/script_commands" android:textColor="@color/accent" />
+    <Button android:id="@+id/menuScriptLogs" android:layout_width="match_parent" android:layout_height="48dp"
+        style="?attr/borderlessButtonStyle" android:text="@string/script_logs" android:textColor="@color/accent" />
     <Button android:id="@+id/menuClose" android:layout_width="match_parent" android:layout_height="52dp"
         style="?attr/borderlessButtonStyle" android:text="@string/cancel" android:textColor="@color/muted" />
 </LinearLayout>

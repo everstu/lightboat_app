@@ -19,6 +19,7 @@ import android.view.Window
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
+import android.webkit.ConsoleMessage
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -51,6 +52,9 @@ import com.journeyapps.barcodescanner.ScanOptions
 import java.util.UUID
 import java.util.concurrent.Executors
 import org.json.JSONObject
+import com.lightboat.app.userscript.ScriptBundle
+import com.lightboat.app.userscript.ScriptPreparer
+import com.lightboat.app.userscript.UserScriptHost
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -71,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private var nativeDialog: Dialog? = null
     private lateinit var defaultUserAgent: String
     private lateinit var fullscreenPlayer: FullscreenPlayer
+    private var userScriptHost: UserScriptHost? = null
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
     private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
@@ -249,6 +254,9 @@ class MainActivity : AppCompatActivity() {
         menu.menuScan.setOnClickListener { dialog.dismiss(); startScan(ScanTarget.COPY) }
         menu.menuRefresh.setOnClickListener { dialog.dismiss(); currentProfile()?.let { openProfile(it) } }
         menu.menuSettings.setOnClickListener { dialog.dismiss(); showProfiles() }
+        menu.menuScriptLogs.setOnClickListener { dialog.dismiss(); showScriptLogs() }
+        menu.menuScriptCommands.isEnabled = userScriptHost?.menus?.isNotEmpty() == true
+        menu.menuScriptCommands.setOnClickListener { dialog.dismiss(); showScriptCommands() }
         menu.menuClose.setOnClickListener { dialog.dismiss() }
         dialog.setCanceledOnTouchOutside(true)
         showNativeDialog(dialog)
@@ -259,6 +267,28 @@ class MainActivity : AppCompatActivity() {
             addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             setDimAmount(0.25f)
         }
+    }
+
+    private fun showScriptLogs() {
+        val logView = android.widget.TextView(this).apply {
+            text = userScriptHost?.logText() ?: "暂无脚本日志"
+            setTextIsSelectable(true)
+            setPadding(24, 16, 24, 16)
+            textSize = 12f
+        }
+        val scroll = android.widget.ScrollView(this).apply { addView(logView) }
+        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.script_logs).setView(scroll)
+            .setPositiveButton(R.string.close, null).create())
+    }
+
+    private fun showScriptCommands() {
+        val host = userScriptHost ?: return
+        val commands = host.menus
+        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.script_commands)
+            .setItems(commands.map { it.title }.toTypedArray()) { dialog, index ->
+                dialog.dismiss()
+                binding.root.post { if (userScriptHost === host) host.invoke(commands[index]) }
+            }.setNegativeButton(R.string.close, null).create())
     }
 
     private fun showProfilePicker() {
@@ -430,8 +460,21 @@ class MainActivity : AppCompatActivity() {
                 if (!isDestroyed && request == generation) {
                     result.fold(onSuccess = { script ->
                         try {
-                            val guard = assets.open("native-guard.js").bufferedReader().use { it.readText() }
-                            createWebView(profile, guard, script)
+                            ScriptPreparer(scriptLoader).prepare(script, profile.scriptUrl, profile.userAgent) { prepared ->
+                                if (!isDestroyed && request == generation) {
+                                    prepared.fold(onSuccess = { bundle ->
+                                        try {
+                                            val guard = assets.open("native-guard.js").bufferedReader().use { it.readText() }
+                                            createWebView(profile, guard, bundle)
+                                        } catch (error: Exception) {
+                                            destroyWebView()
+                                            showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
+                                        }
+                                    }, onFailure = { error ->
+                                        showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
+                                    })
+                                }
+                            }
                         } catch (error: Exception) {
                             destroyWebView()
                             showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
@@ -448,7 +491,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createWebView(profile: Profile, guard: String, script: String) {
+    private fun createWebView(profile: Profile, guard: String, bundle: ScriptBundle) {
         val view = AppWebView(this)
         webView = view
         binding.webContainer.addView(view, android.widget.FrameLayout.LayoutParams(-1, -1))
@@ -471,6 +514,10 @@ class MainActivity : AppCompatActivity() {
         }
         CookieManager.getInstance().setAcceptCookie(true)
         view.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                if (view === webView) userScriptHost?.console(message)
+                return false
+            }
             override fun onShowCustomView(customView: View, callback: WebChromeClient.CustomViewCallback) {
                 if (view !== webView || screen != Screen.BROWSER) { callback.onCustomViewHidden(); return }
                 hideKeyboard()
@@ -494,6 +541,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 if (view !== webView) return
+                userScriptHost?.resetDocuments()
                 fullscreenPlayer.hide()
                 (view as AppWebView).clearClipboardGesture()
                 pageFailed = false
@@ -557,7 +605,8 @@ class MainActivity : AppCompatActivity() {
         val clipboardSupport = assets.open("clipboard-support.js").bufferedReader().use { it.readText() }
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, guard, setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupport, setOf("*"))
-        scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, script, setOf("*"))
+        userScriptHost = UserScriptHost(this, view, profile, bundle)
+        scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
         view.loadUrl(profile.url)
     }
@@ -570,6 +619,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun failPage(message: String) {
+        userScriptHost?.resetDocuments()
         fullscreenPlayer.hide()
         pageFailed = true
         pageReady = false
@@ -651,6 +701,8 @@ class MainActivity : AppCompatActivity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     private fun destroyWebView() {
+        userScriptHost?.close()
+        userScriptHost = null
         fullscreenPlayer.hide()
         scriptHandlers.forEach { runCatching { it.remove() } }
         scriptHandlers.clear()

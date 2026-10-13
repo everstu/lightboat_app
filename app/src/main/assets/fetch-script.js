@@ -1,6 +1,7 @@
 (async () => {
   const send = message => LightboatLoader.postMessage(JSON.stringify(message));
   try {
+    const mode = typeof assetMode === 'undefined' ? 'script' : assetMode;
     // Chromium owns storage, freshness, ETag validation and eviction.
     const response = await fetch(scriptUrl, { cache: 'default', credentials: 'same-origin' });
     if (!response.ok) throw new Error(`脚本服务器返回 HTTP ${response.status}`);
@@ -8,7 +9,7 @@
     const mime = contentType.split(';')[0].trim().toLowerCase();
     const accepted = ['application/javascript', 'text/javascript', 'application/ecmascript',
       'text/ecmascript', 'application/x-javascript', 'text/plain', 'application/octet-stream'];
-    if (mime && !accepted.includes(mime)) throw new Error(`该地址未返回 JavaScript 文件（${mime}）`);
+    if (mode !== 'resource' && mime && !accepted.includes(mime)) throw new Error(`该地址未返回 JavaScript 文件（${mime}）`);
     const limit = 1024 * 1024;
     if (Number(response.headers.get('Content-Length')) > limit) throw new Error('脚本不能超过 1 MiB');
     const reader = response.body.getReader();
@@ -29,11 +30,16 @@
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     const charset = /charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType)?.[1] || 'utf-8';
     const script = new TextDecoder(charset).decode(bytes).replace(/^\uFEFF/, '');
-    if (!script.trim()) throw new Error('脚本内容为空');
-    if (/^\s*<(?:!doctype|html|head|body)\b/i.test(script)) {
+    if (mode !== 'resource' && !script.trim()) throw new Error('脚本内容为空');
+    if (mode !== 'resource' && /^\s*<(?:!doctype|html|head|body)\b/i.test(script)) {
       throw new Error('该地址返回了 HTML 网页，请填写 JS 文件的直接下载地址');
     }
-    send({ script });
+    if (mode === 'script') send({ script });
+    else {
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+      send({ text: script, base64: btoa(binary), mime: mime || 'application/octet-stream' });
+    }
   } catch (error) {
     send({ error: error.message || '无法获取脚本，请检查网络、地址或跨域重定向的 CORS 设置。' });
   }
