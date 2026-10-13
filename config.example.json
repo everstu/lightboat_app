@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "lastProfileId": "main",
+  "profiles": [
+    {
+      "id": "main",
+      "name": "主应用",
+      "url": "https://example.com",
+      "scriptUrl": "https://example.com/app.js"
+    },
+    {
+      "id": "test",
+      "name": "测试环境",
+      "url": "https://test.example.com",
+      "scriptUrl": "https://test.example.com/app.js"
+    }
+  ]
+}

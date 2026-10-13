@@ -1,0 +1,53 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { test } = require('node:test');
+
+const source = fs.readFileSync(path.join(__dirname, '../app/src/main/assets/fetch-script.js'), 'utf8');
+const scriptUrl = 'https://scripts.example.com/app.js';
+async function fetchScript(body, headers = { 'Content-Type': 'application/javascript' }, status = 200) {
+  const messages = [];
+  const calls = [];
+  await vm.runInNewContext(source, {
+    scriptUrl, TextDecoder, Uint8Array,
+    LightboatLoader: { postMessage: text => messages.push(JSON.parse(text)) },
+    fetch: async (url, options) => {
+      calls.push({ url, cache: options.cache, credentials: options.credentials });
+      return new Response(body, { headers, status });
+    }
+  });
+  assert.equal(messages.length, 1);
+  return { message: messages[0], calls };
+}
+
+test('Uses browser default cache and returns raw code without executing it', async () => {
+  const code = 'throw new Error("This code must not execute in the loader");';
+  const result = await fetchScript(code);
+  assert.equal(result.message.script, code);
+  assert.deepEqual(result.calls, [{ url: scriptUrl, cache: 'default', credentials: 'same-origin' }]);
+});
+test('Decodes UTF-8 and retains Unicode and multiline source', async () => {
+  const code = "window.name = '轻舟';\nwindow.ready = true;";
+  assert.equal((await fetchScript('\uFEFF' + code)).message.script, code);
+});
+test('Rejects HTTP failures, HTML content and empty scripts', async () => {
+  assert.match((await fetchScript('not found', undefined, 404)).message.error, /HTTP 404/);
+  assert.match((await fetchScript('<html>login</html>', { 'Content-Type': 'text/html' })).message.error, /JavaScript/);
+  assert.match((await fetchScript('<!doctype html><html>login</html>', { 'Content-Type': 'text/plain' })).message.error, /HTML/);
+  assert.match((await fetchScript('  ')).message.error, /为空/);
+});
+test('Limits both declared and actual response size', async () => {
+  assert.match((await fetchScript('x', { 'Content-Type': 'text/javascript', 'Content-Length': '1048577' })).message.error, /1 MiB/);
+  assert.match((await fetchScript('x'.repeat(1048577))).message.error, /1 MiB/);
+});
+test('Reports browser network or CORS errors', async () => {
+  const messages = [];
+  await vm.runInNewContext(source, {
+    scriptUrl, TextDecoder, Uint8Array,
+    LightboatLoader: { postMessage: text => messages.push(JSON.parse(text)) },
+    fetch: async () => { throw new Error('Failed to fetch'); }
+  });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].error, 'Failed to fetch');
+});

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:layout_marginBottom="14dp" android:orientation="vertical"
+    android:padding="18dp" android:background="@drawable/bg_input">
+    <TextView android:id="@+id/profileName" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textSize="19sp" android:textStyle="bold" android:textColor="@color/ink" />
+    <TextView android:id="@+id/profileBadge" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/accent" />
+    <TextView android:id="@+id/profileUrl" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:textSize="13sp" android:textColor="@color/muted"
+        android:maxLines="2" android:ellipsize="end" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp">
+        <Button android:id="@+id/openProfile" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="48dp" style="?attr/borderlessButtonStyle" android:text="@string/switch_profile"
+            android:textColor="@color/accent" />
+        <Button android:id="@+id/editProfile" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="48dp" style="?attr/borderlessButtonStyle" android:text="@string/edit"
+            android:textColor="@color/ink" />
+        <Button android:id="@+id/deleteProfile" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="48dp" style="?attr/borderlessButtonStyle" android:text="@string/delete"
+            android:textColor="@color/error" />
+    </LinearLayout>
+</LinearLayout>
