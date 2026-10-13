@@ -3,8 +3,13 @@
     android:layout_width="match_parent" android:layout_height="wrap_content"
     android:layout_marginBottom="14dp" android:orientation="vertical"
     android:padding="18dp" android:background="@drawable/bg_input">
-    <TextView android:id="@+id/profileName" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:textSize="19sp" android:textStyle="bold" android:textColor="@color/ink" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/profileName" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:textSize="19sp" android:textStyle="bold" android:textColor="@color/ink" />
+        <ImageButton android:id="@+id/dragHandle" android:layout_width="48dp" android:layout_height="48dp"
+            android:src="@drawable/ic_drag" android:contentDescription="@string/drag_profile"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+    </LinearLayout>
     <TextView android:id="@+id/profileBadge" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/accent" />
     <TextView android:id="@+id/profileUrl" android:layout_width="match_parent" android:layout_height="wrap_content"

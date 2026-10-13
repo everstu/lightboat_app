@@ -8,7 +8,7 @@
     <string name="profile_name">配置名称</string>
     <string name="profile_name_hint">例如：工作应用</string>
     <string name="profiles_title">我的配置</string>
-    <string name="profiles_note">启动时自动打开最后一次切换的配置。脚本与网页使用 WebView 自带的 HTTP 缓存。</string>
+    <string name="profiles_note">长按配置卡片或拖动图标可上下排序。启动时自动打开最后一次切换的配置。</string>
     <string name="empty_profiles">还没有配置\n请先添加网页与 JS 地址。</string>
     <string name="add_profile">添加配置</string>
     <string name="import_config">导入 JSON</string>
@@ -85,4 +85,5 @@
     <string name="exit_player_fullscreen">退出播放器全屏</string>
     <string name="script_commands">脚本命令</string>
     <string name="script_logs">脚本日志</string>
+    <string name="drag_profile">长按拖动配置排序</string>
 </resources>

@@ -31,6 +31,14 @@ data class AppConfig(val lastProfileId: String?, val profiles: List<Profile>) {
         return copy(lastProfileId = id)
     }
 
+    fun reorder(ids: List<String>): AppConfig {
+        require(ids.size == profiles.size && ids.toSet().size == ids.size && ids.toSet() == profiles.map { it.id }.toSet()) {
+            "排序必须保留全部配置且不能重复"
+        }
+        val byId = profiles.associateBy { it.id }
+        return copy(profiles = ids.map { byId.getValue(it) })
+    }
+
     companion object {
         const val MAX_PROFILES = 50
         val EMPTY = AppConfig(null, emptyList())

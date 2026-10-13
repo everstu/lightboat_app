@@ -71,4 +71,21 @@ class AppConfigTest {
         val duplicate = """{"version":1,"lastProfileId":"x","profiles":[{"id":"x","name":"a","url":"https://example.com","scriptUrl":"https://example.com/a.js"},{"id":"x","name":"b","url":"https://example.com","scriptUrl":"https://example.com/b.js"}]}"""
         assertThrows(Exception::class.java) { ConfigCodec.decode(duplicate) }
     }
+
+    @Test fun reorderingPreservesValuesAndLastSelectionAcrossJsonRoundTrip() {
+        val config = AppConfig.EMPTY.upsert(first).upsert(second).select(first.id)
+        val reordered = config.reorder(listOf(second.id, first.id))
+        assertEquals(listOf(second, first), reordered.profiles)
+        assertEquals(first, reordered.lastProfile)
+        assertEquals(reordered, ConfigCodec.decode(ConfigCodec.encode(reordered)))
+        assertEquals(config, reordered.reorder(listOf(first.id, second.id)))
+    }
+
+    @Test fun reorderingCannotDropDuplicateOrInventProfiles() {
+        val config = AppConfig.EMPTY.upsert(first).upsert(second)
+        listOf(listOf(first.id), listOf(first.id, first.id), listOf(first.id, "missing")).forEach { ids ->
+            assertThrows(IllegalArgumentException::class.java) { config.reorder(ids) }
+        }
+        assertEquals(AppConfig.EMPTY, AppConfig.EMPTY.reorder(emptyList()))
+    }
 }

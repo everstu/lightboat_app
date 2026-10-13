@@ -28,6 +28,8 @@ git push origin v1.1.0
 ## 使用与配置
 
 - 无配置时，点击 **添加配置**，填写名称、网页 URL 和 JS 在线地址，保存并打开。
+- 配置列表右下角的 **＋** 悬浮按钮用于添加配置，滚动列表时始终可见。
+- 长按配置卡片或右上角排序图标，上下拖动调整顺序；松手自动写入配置文件，重启和 JSON 导入导出保留顺序。排序不改变最后使用的启动配置。
 - 浏览页贴边悬浮按钮 → **配置管理** 查看所有配置；点击 **打开** 切换，同时记录为下次启动项。
 - **编辑** 修改名称和两个地址；保存后打开该组，并记录为下次启动项。
 - 删除最后使用项时，下次启动使用剩余第一组；删除全部配置后提示添加。
@@ -148,5 +150,6 @@ Android 编译、Lint、Kotlin 测试由 GitHub Actions 执行。真机验收重
 10. HTTPS 网页的 `navigator.clipboard.writeText()` 和旧式复制按钮有效；无用户点击的脚本复制失败。
 11. 视频全屏切横屏；播放器退出、应用关闭按钮和 Android 返回键均恢复原方向且不重载网页；检查跨域 iframe 播放器、暂停/恢复及全屏中页面跳转。
 12. 油猴脚本无 run-at 时等 DOM 就绪；match/exclude/noframes 正常，require/resource 准备正确，GM 存储重启后保留，命令和日志可查看。
+13. 长按拖动配置排序并自动滚动，重启/导出后顺序保留，启动项不变；右下角新增按钮不随列表滚走，也不会挡住最后一项操作。
 
 参考：[提前注入接口](https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)) · [WebView HTTP(S) base URL](https://developer.android.com/reference/android/webkit/WebView#loadDataWithBaseURL(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String))。

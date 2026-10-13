@@ -44,7 +44,9 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import androidx.webkit.WebMessageCompat
 import com.lightboat.app.databinding.ActivityMainBinding
-import com.lightboat.app.databinding.ItemProfileBinding
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.lightboat.app.databinding.DialogBrowserMenuBinding
 import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
@@ -76,6 +78,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var defaultUserAgent: String
     private lateinit var fullscreenPlayer: FullscreenPlayer
     private var userScriptHost: UserScriptHost? = null
+    private lateinit var profileAdapter: ProfileAdapter
+    private lateinit var profileDrag: ItemTouchHelper
+    private var profileOrderDirty = false
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
     private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
@@ -112,6 +117,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         fullscreenPlayer = FullscreenPlayer(this, binding.root) { updateChrome() }
+        setupProfileList()
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
@@ -191,6 +197,7 @@ class MainActivity : AppCompatActivity() {
     private fun currentProfile() = config.profiles.firstOrNull { it.id == currentId }
 
     private fun showScreen(next: Screen) {
+        if (screen == Screen.PROFILES && next != Screen.PROFILES) commitProfileOrder()
         screen = next
         binding.configPanel.visibility = if (next == Screen.EDITOR) View.VISIBLE else View.GONE
         binding.profilesPanel.visibility = if (next == Screen.PROFILES) View.VISIBLE else View.GONE
@@ -369,31 +376,60 @@ class MainActivity : AppCompatActivity() {
         showScreen(Screen.PROFILES)
         binding.emptyProfiles.visibility = if (config.profiles.isEmpty()) View.VISIBLE else View.GONE
         binding.returnButton.visibility = if (pageReady && webView != null) View.VISIBLE else View.GONE
-        binding.profilesList.removeAllViews()
         binding.addButton.isEnabled = config.profiles.size < AppConfig.MAX_PROFILES
-        config.profiles.forEach { profile ->
-            val row = ItemProfileBinding.inflate(layoutInflater, binding.profilesList, false)
-            row.profileName.text = profile.name
-            row.profileUrl.text = profile.url
-            row.profileBadge.text = listOfNotNull(
-                getString(R.string.last_profile).takeIf { profile.id == config.lastProfileId },
-                getString(R.string.current_profile).takeIf { profile.id == currentId && webView != null }
-            ).joinToString(" · ")
-            row.profileBadge.visibility = if (row.profileBadge.text.isEmpty()) View.GONE else View.VISIBLE
-            row.openProfile.setOnClickListener { openProfile(profile) }
-            row.editProfile.setOnClickListener { showEditor(profile) }
-            row.deleteProfile.setOnClickListener {
-                AlertDialog.Builder(this).setTitle(R.string.delete_title).setMessage(R.string.delete_message)
-                    .setNegativeButton(R.string.stay, null)
-                    .setPositiveButton(R.string.delete) { _, _ ->
-                        if (persist(config.remove(profile.id))) {
-                            if (currentId == profile.id) { destroyWebView(); currentId = null }
-                            showProfiles()
-                        }
-                    }.show()
-            }
-            binding.profilesList.addView(row.root)
+        binding.addButton.alpha = if (binding.addButton.isEnabled) 1f else 0.4f
+        profileOrderDirty = false
+        profileAdapter.submit(config, currentId.takeIf { webView != null })
+    }
+
+    private fun setupProfileList() {
+        profileAdapter = ProfileAdapter(::openProfile, ::showEditor, ::confirmDeleteProfile) { holder ->
+            profileDrag.startDrag(holder)
         }
+        binding.profilesList.layoutManager = LinearLayoutManager(this)
+        binding.profilesList.adapter = profileAdapter
+        profileDrag = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
+            override fun onMove(list: RecyclerView, from: RecyclerView.ViewHolder, to: RecyclerView.ViewHolder): Boolean {
+                val moved = profileAdapter.move(from.bindingAdapterPosition, to.bindingAdapterPosition)
+                if (moved) profileOrderDirty = true
+                return moved
+            }
+
+            override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) = Unit
+
+            override fun onSelectedChanged(holder: RecyclerView.ViewHolder?, actionState: Int) {
+                super.onSelectedChanged(holder, actionState)
+                if (actionState == ItemTouchHelper.ACTION_STATE_IDLE) commitProfileOrder()
+            }
+
+            override fun clearView(list: RecyclerView, holder: RecyclerView.ViewHolder) {
+                super.clearView(list, holder)
+                commitProfileOrder()
+            }
+        })
+        profileDrag.attachToRecyclerView(binding.profilesList)
+    }
+
+    private fun commitProfileOrder() {
+        if (!::profileAdapter.isInitialized || !profileOrderDirty) return
+        profileOrderDirty = false
+        val ids = profileAdapter.orderedIds
+        if (ids == config.profiles.map { it.id }) return
+        // A configuration import/delete can invalidate an old drag animation's callback.
+        if (ids.toSet() != config.profiles.map { it.id }.toSet()) return
+        if (!persist(config.reorder(ids))) profileAdapter.submit(config, currentId.takeIf { webView != null })
+    }
+
+    private fun confirmDeleteProfile(profile: Profile) {
+        commitProfileOrder()
+        AlertDialog.Builder(this).setTitle(R.string.delete_title).setMessage(R.string.delete_message)
+            .setNegativeButton(R.string.stay, null)
+            .setPositiveButton(R.string.delete) { _, _ ->
+                if (persist(config.remove(profile.id))) {
+                    if (currentId == profile.id) { destroyWebView(); currentId = null }
+                    showProfiles()
+                }
+            }.show()
     }
 
     private fun showEditor(profile: Profile?) {
@@ -674,6 +710,7 @@ class MainActivity : AppCompatActivity() {
                         .setNegativeButton(R.string.stay, null)
                         .setPositiveButton(R.string.import_confirm) { _, _ ->
                             if (persist(imported)) {
+                                profileOrderDirty = false
                                 cancelDownload(); destroyWebView(); currentId = null
                                 launchLast()
                             }
@@ -733,7 +770,12 @@ class MainActivity : AppCompatActivity() {
         outState.putFloat("menuHeight", binding.edgeMenuButton.heightFraction)
     }
 
-    override fun onPause() { webView?.onPause(); CookieManager.getInstance().flush(); super.onPause() }
+    override fun onPause() {
+        if (screen == Screen.PROFILES) commitProfileOrder()
+        webView?.onPause()
+        CookieManager.getInstance().flush()
+        super.onPause()
+    }
     override fun onResume() { super.onResume(); webView?.onResume(); updateChrome() }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
