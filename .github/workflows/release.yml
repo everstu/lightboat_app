@@ -1,0 +1,66 @@
+name: Publish GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Check browser scripts
+        run: |
+          node tests/native-guard.test.cjs
+          node --test tests/fetch-script.test.cjs
+      - name: Build, test and lint debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - name: Prepare release attachment
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p release-assets
+          cp app/build/outputs/apk/debug/app-debug.apk "release-assets/lightboat-${RELEASE_TAG}-debug.apk"
+      - name: Publish debug APK
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Lightboat ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            Android debug APK. Uses Android's default debug signing; no custom signing keys are required.
+            Android 8.0 or later and a WebView supporting document-start injection are required.
+          files: release-assets/*.apk
+          fail_on_unmatched_files: true
+      - name: Upload check reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-check-reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          if-no-files-found: ignore

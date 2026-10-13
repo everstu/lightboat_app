@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+    android:padding="24dp" android:background="@color/paper">
+    <TextView android:id="@+id/menuProfileName" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textColor="@color/ink" android:textStyle="bold" android:textSize="22sp" android:layout_marginBottom="16dp" />
+    <Button android:id="@+id/menuSwitch" android:layout_width="match_parent" android:layout_height="52dp"
+        style="?attr/borderlessButtonStyle" android:text="@string/switch_configuration" android:textColor="@color/accent" />
+    <Button android:id="@+id/menuScan" android:layout_width="match_parent" android:layout_height="52dp"
+        style="?attr/borderlessButtonStyle" android:text="@string/scan_copy" android:textColor="@color/accent" />
+    <Button android:id="@+id/menuRefresh" android:layout_width="match_parent" android:layout_height="52dp"
+        style="?attr/borderlessButtonStyle" android:text="@string/refresh" android:textColor="@color/accent" />
+    <Button android:id="@+id/menuSettings" android:layout_width="match_parent" android:layout_height="52dp"
+        style="?attr/borderlessButtonStyle" android:text="@string/manage_configurations" android:textColor="@color/accent" />
+    <Button android:id="@+id/menuClose" android:layout_width="match_parent" android:layout_height="52dp"
+        style="?attr/borderlessButtonStyle" android:text="@string/cancel" android:textColor="@color/muted" />
+</LinearLayout>

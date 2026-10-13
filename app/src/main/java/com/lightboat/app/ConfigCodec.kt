@@ -4,7 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object ConfigCodec {
-    fun decode(text: String): AppConfig {
+    fun decode(text: String, defaultUserAgent: String = AppConfig.DEFAULT_USER_AGENT): AppConfig {
         val root = JSONObject(text)
         require(root.getInt("version") == 1) { "不支持此配置文件版本" }
         val array = root.getJSONArray("profiles")
@@ -16,7 +16,8 @@ object ConfigCodec {
             require(id.isNotBlank() && id.length <= 100) { "配置 ID 无效" }
             require(name.isNotBlank() && name.length <= 60) { "配置名称须为 1–60 个字符" }
             Profile(id, name, AppConfig.normalizeUrl(item.getString("url")),
-                AppConfig.normalizeUrl(item.getString("scriptUrl")))
+                AppConfig.normalizeUrl(item.getString("scriptUrl")),
+                AppConfig.normalizeUserAgent(if (item.has("userAgent")) item.getString("userAgent") else defaultUserAgent))
         }
         require(profiles.map { it.id }.distinct().size == profiles.size) { "配置 ID 不能重复" }
         require(root.has("lastProfileId")) { "缺少 lastProfileId" }
@@ -37,6 +38,7 @@ object ConfigCodec {
                     put("name", profile.name)
                     put("url", profile.url)
                     put("scriptUrl", profile.scriptUrl)
+                    put("userAgent", profile.userAgent)
                 })
             }
         })

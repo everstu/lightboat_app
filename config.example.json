@@ -6,13 +6,15 @@
       "id": "main",
       "name": "主应用",
       "url": "https://example.com",
-      "scriptUrl": "https://example.com/app.js"
+      "scriptUrl": "https://example.com/app.js",
+      "userAgent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     },
     {
       "id": "test",
       "name": "测试环境",
       "url": "https://test.example.com",
-      "scriptUrl": "https://test.example.com/app.js"
+      "scriptUrl": "https://test.example.com/app.js",
+      "userAgent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     }
   ]
 }

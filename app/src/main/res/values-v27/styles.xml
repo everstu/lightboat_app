@@ -4,4 +4,10 @@
         <item name="android:navigationBarColor">@color/paper</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>
+    <style name="Theme.Lightboat.Scanner" parent="Theme.Lightboat">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:statusBarColor">@color/ink</item>
+        <item name="android:navigationBarColor">@color/ink</item>
+    </style>
 </resources>

@@ -5,21 +5,33 @@
 ## GitHub Actions 在线构建
 
 1. 把本目录全部文件上传或推送到 GitHub 仓库，包含 `.github/`、`gradle/`、`gradlew` 和 `gradlew.bat`。
-2. 仓库 **Actions → Build Android APK** 会自动运行；也可以使用 **Run workflow** 手动触发。
+2. 仓库 **Actions → Build Android APK → Run workflow** 手动触发；普通推送和 PR 不自动构建。
 3. 成功后在该次运行的 **Artifacts** 下载 `lightboat-debug-apk`，解压得到 `app-debug.apk`，传到 Android 手机安装。
 
 工作流执行网页交互和脚本获取测试、Kotlin 单元测试、Android Lint 和 `assembleDebug`，无需本地安装 JDK 或 Android SDK。最低 Android 8.0（API 26），系统 WebView 需支持提前注入和 WebMessage 接口。
 
 输出为可直接安装的 debug APK。正式发布需要自己的 release 签名。不同 Actions 运行的默认 debug 签名可能不同；覆盖安装遇到签名不一致时，先导出配置，再卸载旧版、安装新版并导入配置。
 
+### 标签自动发布
+
+推送 `v*` 标签会触发独立的 **Publish GitHub Release** 工作流，测试和 Lint 通过后，将 debug APK 上传到该标签的 GitHub Release。无需自定义签名密钥或 Secrets，使用构建工具的默认 debug 签名。例如：
+
+```sh
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+附件名为 `lightboat-v1.1.0-debug.apk`。标签发布与普通手动构建相互独立。仓库 Actions 的默认 `GITHUB_TOKEN` 需允许工作流声明的 `contents: write` 权限。
+
 ## 使用与配置
 
 - 无配置时，点击 **添加配置**，填写名称、网页 URL 和 JS 在线地址，保存并打开。
-- 浏览页右上角 **设置** 查看所有配置；点击 **打开** 切换，同时记录为下次启动项。
+- 浏览页贴边悬浮按钮 → **配置管理** 查看所有配置；点击 **打开** 切换，同时记录为下次启动项。
 - **编辑** 修改名称和两个地址；保存后打开该组，并记录为下次启动项。
 - 删除最后使用项时，下次启动使用剩余第一组；删除全部配置后提示添加。
 - **导出 JSON / 导入 JSON** 使用系统文件选择器读写配置文件；导入在确认后替换全部配置。
-- 右上角 **刷新** 重新获取脚本并打开该配置的入口网页，继续遵循浏览器缓存规则。
+- 悬浮菜单中的 **刷新** 重新获取脚本并打开该配置的入口网页，继续遵循浏览器缓存规则。
+- 每组配置支持 **请求 User-Agent（UA）**：新增时填入当前设备的安卓移动浏览器 UA，可编辑或恢复默认。网页、子资源及 JS 准备请求均使用该配置的 UA。旧 JSON 未填写 `userAgent` 时使用设备默认 UA。
 
 运行时配置保存在应用私有目录 `files/config.json`，原子写入；设置操作都修改此 JSON 文件。`app/src/main/assets/config.json` 是首次安装的空配置模板。`config.example.json` 仅展示格式，不会内置到应用。
 
@@ -32,13 +44,26 @@
       "id": "work",
       "name": "工作应用",
       "url": "https://your-site.example/",
-      "scriptUrl": "https://your-site.example/inject.js"
+      "scriptUrl": "https://your-site.example/inject.js",
+      "userAgent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     }
   ]
 }
 ```
 
 空配置：`{"version":1,"lastProfileId":null,"profiles":[]}`。非空配置的 `lastProfileId` 必须对应已有项；ID 不重复，名称为 1–60 字符，最多 50 组。地址支持 HTTP/HTTPS，不接受 `file:`、`javascript:` 或带账号密码的 URL。JS 必须是可直接读取的脚本文件，不能填写 GitHub 文件预览页等 HTML 地址。
+
+UA 最长 2048 字符，使用可打印 ASCII，不接受换行和控制字符；更改 UA 后网页内容及服务器按 `Vary: User-Agent` 区分的缓存可能不同。
+
+## 全屏与扫码
+
+网页成功显示后隐藏应用标题栏和系统状态/导航栏。边缘滑动可暂时唤出系统栏；配置页、错误页和扫码页恢复正常系统栏。保留屏幕刘海安全区域和键盘避让。
+
+浏览时点击贴边悬浮按钮，底部菜单提供 **切换配置、扫码复制、刷新、配置管理**。按钮可拖动到左右边缘，闲置 3 秒后变淡并向边缘收起 8 dp，保留 48 dp 可点击区域。无需系统悬浮窗权限。选择当前正在浏览的配置、关闭菜单、扫码返回或从配置列表返回浏览均不重新加载网页；切换到其他配置才重新打开。系统回收应用进程后需重新加载，这是正常生命周期行为。
+
+配置编辑页的网页地址和 JS 地址各有扫码按钮：识别单个 HTTP/HTTPS URL 后回填对应字段，不自动保存或打开；普通文字或无效 URL 提示错误并保留原输入内容。菜单 **扫码复制** 识别任意二维码文字，显示结果，点击 **复制** 写入系统剪贴板，也可重新扫描。
+
+使用 APK 内置的 ZXing 离线二维码识别，仅支持二维码。首次点击扫码时请求相机权限，不保存拍摄图片；拒绝权限可以返回并继续浏览，也可以前往系统应用设置授权。应用本身不向网页开放相机权限。扫码复制属于原生功能，网页复制粘贴限制继续保留。
 
 ## 浏览器缓存与提前注入
 
@@ -101,5 +126,8 @@ Android 编译、Lint、Kotlin 测试由 GitHub Actions 执行。真机验收重
 4. JS 设置 `window.__injectedEarly = true`；目标网页最前面的脚本检查此值，刷新、跳转和 iframe 也检查。
 5. 长按、鼠标右键、复制/粘贴被拦截；滑动、点击与普通输入正常。
 6. 脚本获取失败、页面断网、HTTP/证书错误能重试或修改配置。
+7. 成功打开后全屏；悬浮按钮拖动、收起、菜单、刘海及键盘避让正常；扫码取消/返回不刷新网页。
+8. 两个字段扫码准确回填，普通文本仅在扫码复制入口支持，拒绝相机权限可返回。
+9. UA 默认值可改可恢复，JSON 往返保留 UA，旧 JSON 可导入；服务器观察网页和 JS 请求头。
 
 参考：[提前注入接口](https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)) · [WebView HTTP(S) base URL](https://developer.android.com/reference/android/webkit/WebView#loadDataWithBaseURL(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String))。

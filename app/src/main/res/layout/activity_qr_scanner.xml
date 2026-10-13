@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scannerRoot" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/ink">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
+        android:paddingStart="24dp" android:paddingEnd="12dp" android:gravity="center_vertical">
+        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/scan_title" android:textColor="@color/white" android:textSize="22sp" />
+        <Button android:id="@+id/closeScanner" android:layout_width="wrap_content" android:layout_height="48dp"
+            style="?attr/borderlessButtonStyle" android:text="@string/close" android:textColor="@color/white" />
+    </LinearLayout>
+    <com.journeyapps.barcodescanner.DecoratedBarcodeView android:id="@+id/zxing_barcode_scanner"
+        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+</LinearLayout>

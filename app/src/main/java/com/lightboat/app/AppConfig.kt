@@ -2,7 +2,13 @@ package com.lightboat.app
 
 import java.net.URI
 
-data class Profile(val id: String, val name: String, val url: String, val scriptUrl: String)
+data class Profile(
+    val id: String,
+    val name: String,
+    val url: String,
+    val scriptUrl: String,
+    val userAgent: String = AppConfig.DEFAULT_USER_AGENT
+)
 
 data class AppConfig(val lastProfileId: String?, val profiles: List<Profile>) {
     val lastProfile: Profile? get() = profiles.firstOrNull { it.id == lastProfileId }
@@ -28,6 +34,17 @@ data class AppConfig(val lastProfileId: String?, val profiles: List<Profile>) {
     companion object {
         const val MAX_PROFILES = 50
         val EMPTY = AppConfig(null, emptyList())
+        // Fallback for platform-independent decoding; new profiles use the device's mobile UA.
+        const val DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+        fun normalizeUserAgent(value: String): String {
+            val text = value.trim()
+            require(text.isNotBlank() && text.length <= 2048 && value.all { it.code in 32..126 }) {
+                "UA 须为 1–2048 个可打印 ASCII 字符，不能包含换行"
+            }
+            return text
+        }
 
         fun normalizeUrl(value: String): String {
             val text = value.trim()

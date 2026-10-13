@@ -10,6 +10,11 @@
         <item name="android:windowBackground">@color/paper</item>
     </style>
     <style name="Theme.Lightboat" parent="Base.Theme.Lightboat" />
+    <style name="Theme.Lightboat.Scanner" parent="Theme.Lightboat">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/ink</item>
+        <item name="android:navigationBarColor">@color/ink</item>
+    </style>
     <style name="FieldLabel">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>

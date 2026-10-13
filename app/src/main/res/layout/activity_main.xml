@@ -3,7 +3,7 @@
     android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:background="@color/paper">
 
-    <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
+    <LinearLayout android:id="@+id/titleBar" android:layout_width="match_parent" android:layout_height="64dp"
         android:gravity="center_vertical" android:paddingStart="24dp" android:paddingEnd="8dp">
         <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
             android:text="@string/app_name" android:textColor="@color/ink" android:textSize="22sp"
@@ -16,7 +16,7 @@
             android:background="?attr/selectableItemBackgroundBorderless" android:visibility="gone" />
     </LinearLayout>
 
-    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+    <FrameLayout android:id="@+id/contentArea" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
         <LinearLayout android:id="@+id/browserPanel" android:layout_width="match_parent"
             android:layout_height="match_parent" android:orientation="vertical" android:visibility="gone"
             android:background="@color/white">
@@ -46,17 +46,37 @@
                     android:text="@string/profile_name" android:labelFor="@id/nameInput" />
                 <EditText android:id="@+id/nameInput" style="@style/UrlField" android:inputType="textCapSentences"
                     android:hint="@string/profile_name_hint" android:maxLength="60" android:imeOptions="actionNext" />
-                <TextView style="@style/FieldLabel" android:layout_marginTop="24dp"
-                    android:text="@string/website_label" android:labelFor="@id/websiteInput" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp" android:gravity="center_vertical">
+                    <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
+                        android:text="@string/website_label" android:labelFor="@id/websiteInput" />
+                    <ImageButton android:id="@+id/scanWebsiteButton" android:layout_width="48dp" android:layout_height="48dp"
+                        android:src="@drawable/ic_scan" android:contentDescription="@string/scan_website"
+                        android:background="?attr/selectableItemBackgroundBorderless" />
+                </LinearLayout>
                 <EditText android:id="@+id/websiteInput" style="@style/UrlField"
                     android:hint="@string/website_hint" android:imeOptions="actionNext" />
-                <TextView style="@style/FieldLabel" android:layout_marginTop="24dp"
-                    android:text="@string/script_label" android:labelFor="@id/scriptInput" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp" android:gravity="center_vertical">
+                    <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
+                        android:text="@string/script_label" android:labelFor="@id/scriptInput" />
+                    <ImageButton android:id="@+id/scanScriptButton" android:layout_width="48dp" android:layout_height="48dp"
+                        android:src="@drawable/ic_scan" android:contentDescription="@string/scan_script"
+                        android:background="?attr/selectableItemBackgroundBorderless" />
+                </LinearLayout>
                 <EditText android:id="@+id/scriptInput" style="@style/UrlField"
                     android:hint="@string/script_hint" android:imeOptions="actionDone" />
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="10dp" android:text="@string/script_help"
                     android:textColor="@color/muted" android:textSize="13sp" />
+                <TextView style="@style/FieldLabel" android:layout_marginTop="24dp"
+                    android:text="@string/user_agent_label" android:labelFor="@id/userAgentInput" />
+                <EditText android:id="@+id/userAgentInput" style="@style/UrlField"
+                    android:inputType="textMultiLine|textNoSuggestions" android:singleLine="false"
+                    android:minLines="3" android:maxLines="8" android:maxLength="2048" android:gravity="top|start"
+                    android:hint="@string/user_agent_label" />
+                <Button android:id="@+id/resetUserAgentButton" android:layout_width="match_parent" android:layout_height="48dp"
+                    style="?attr/borderlessButtonStyle" android:text="@string/reset_user_agent" android:textColor="@color/accent" />
                 <Button android:id="@+id/saveButton" android:layout_width="match_parent"
                     android:layout_height="60dp" android:layout_marginTop="32dp" android:text="@string/open_app"
                     android:textColor="@color/white" android:backgroundTint="@color/accent" android:textSize="16sp" />
@@ -122,5 +142,12 @@
                 style="?attr/borderlessButtonStyle" android:text="@string/edit_addresses"
                 android:textColor="@color/accent" android:visibility="gone" />
         </LinearLayout>
+        <FrameLayout android:id="@+id/menuLayer" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:visibility="gone" android:clipChildren="true" android:clipToPadding="true">
+            <com.lightboat.app.EdgeMenuButton android:id="@+id/edgeMenuButton" android:layout_width="56dp"
+                android:layout_height="56dp" android:src="@drawable/ic_menu" android:padding="16dp"
+                android:background="@drawable/bg_menu_button" android:contentDescription="@string/browser_menu"
+                android:elevation="8dp" />
+        </FrameLayout>
     </FrameLayout>
 </LinearLayout>

@@ -62,4 +62,24 @@
     <string name="exit_message">下次启动将自动打开最后使用的配置。</string>
     <string name="exit">退出</string>
     <string name="stay">继续浏览</string>
+    <string name="browser_menu">浏览菜单，可拖动到屏幕边缘</string>
+    <string name="switch_configuration">切换配置</string>
+    <string name="manage_configurations">配置管理</string>
+    <string name="scan_copy">扫码复制</string>
+    <string name="scan_website">扫码填写网页地址</string>
+    <string name="scan_script">扫码填写 JS 地址</string>
+    <string name="scan_title">扫描二维码</string>
+    <string name="scan_prompt">将二维码放入取景框内</string>
+    <string name="close">关闭</string>
+    <string name="copy">复制</string>
+    <string name="scan_again">重新扫描</string>
+    <string name="scan_result">识别结果</string>
+    <string name="scan_invalid">二维码中不是有效的 HTTP/HTTPS 地址，原输入内容已保留。</string>
+    <string name="copied">已复制扫码内容</string>
+    <string name="camera_unavailable">此设备没有可用的相机</string>
+    <string name="camera_permission_title">需要相机权限</string>
+    <string name="camera_permission_message">扫码需要相机权限。可前往系统应用设置授予权限后重试。</string>
+    <string name="open_system_settings">打开系统设置</string>
+    <string name="user_agent_label">请求 User-Agent（UA）</string>
+    <string name="reset_user_agent">恢复安卓手机默认 UA</string>
 </resources>

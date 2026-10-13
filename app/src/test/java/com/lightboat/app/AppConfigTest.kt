@@ -43,6 +43,25 @@ class AppConfigTest {
         assertEquals(AppConfig.EMPTY, ConfigCodec.decode(ConfigCodec.encode(AppConfig.EMPTY)))
     }
 
+    @Test fun customUserAgentRoundTripsWithoutChangingSelection() {
+        val profile = first.copy(userAgent = "Custom Android Mobile/1.0")
+        val config = AppConfig.EMPTY.upsert(profile)
+        assertEquals(profile, ConfigCodec.decode(ConfigCodec.encode(config)).lastProfile)
+    }
+
+    @Test fun oldConfigUsesProvidedDefaultUserAgent() {
+        val text = """{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"应用","url":"https://example.com","scriptUrl":"https://example.com/a.js"}]}"""
+        assertEquals("Device Android Mobile/1.0", ConfigCodec.decode(text, "Device Android Mobile/1.0").lastProfile?.userAgent)
+        assertEquals(AppConfig.DEFAULT_USER_AGENT, ConfigCodec.decode(text).lastProfile?.userAgent)
+    }
+
+    @Test fun rejectsEmptyNonAsciiAndHeaderInjectionUserAgents() {
+        listOf("", "   ", "Agent\r\nX-Header: true", "\nAgent", "Agent\tTest", "中文 UA", "x".repeat(2049)).forEach {
+            assertThrows(IllegalArgumentException::class.java) { AppConfig.normalizeUserAgent(it) }
+        }
+        assertEquals("Android Mobile/1.0", AppConfig.normalizeUserAgent(" Android Mobile/1.0 "))
+    }
+
     @Test fun malformedImportsAreRejectedWithoutGuessingSelection() {
         val valid = ConfigCodec.encode(AppConfig.EMPTY.upsert(first))
         assertThrows(Exception::class.java) { ConfigCodec.decode(valid.replace("\"version\": 1", "\"version\": 2")) }

@@ -1,10 +1,22 @@
 package com.lightboat.app
 
 import android.annotation.SuppressLint
+import android.app.Dialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.net.http.SslError
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.view.Gravity
 import android.view.View
+import android.view.Window
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
@@ -24,11 +36,16 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.lightboat.app.databinding.ActivityMainBinding
 import com.lightboat.app.databinding.ItemProfileBinding
+import com.lightboat.app.databinding.DialogBrowserMenuBinding
+import com.google.zxing.client.android.Intents
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import java.util.UUID
 import java.util.concurrent.Executors
 
@@ -47,8 +64,23 @@ class MainActivity : AppCompatActivity() {
     private var pageReady = false
     private var screen = Screen.PROFILES
     private var exportSnapshot: String? = null
+    private var scanTarget: ScanTarget? = null
+    private var nativeDialog: Dialog? = null
+    private lateinit var defaultUserAgent: String
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
+    private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
+
+    private val scanner = registerForActivityResult(ScanContract()) { result ->
+        val target = scanTarget
+        scanTarget = null
+        updateChrome()
+        if (result.originalIntent?.getBooleanExtra(Intents.Scan.MISSING_CAMERA_PERMISSION, false) == true) {
+            showCameraPermissionHelp()
+        } else if (target != null && result.contents != null) {
+            applyScanResult(target, result.contents)
+        }
+    }
 
     private val importFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) importConfig(uri)
@@ -71,13 +103,22 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val bars = insets.getInsets(if (screen == Screen.BROWSER) WindowInsetsCompat.Type.displayCutout()
+                else WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
             view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard.bottom))
             insets
         }
         store = ConfigStore(this)
+        defaultUserAgent = MobileUserAgent.default(this)
         scriptLoader = BrowserScriptLoader(this, binding.webContainer)
+        binding.edgeMenuButton.setOnClickListener { showBrowserMenu() }
+        binding.scanWebsiteButton.setOnClickListener { startScan(ScanTarget.WEBSITE) }
+        binding.scanScriptButton.setOnClickListener { startScan(ScanTarget.SCRIPT) }
+        binding.resetUserAgentButton.setOnClickListener {
+            binding.userAgentInput.setText(defaultUserAgent)
+            binding.userAgentInput.error = null
+        }
         binding.settingsButton.setOnClickListener { showProfiles() }
         binding.editButton.setOnClickListener { showProfiles() }
         binding.refreshButton.setOnClickListener { currentProfile()?.let { openProfile(it) } }
@@ -106,11 +147,17 @@ class MainActivity : AppCompatActivity() {
             AppConfig.EMPTY
         }
         exportSnapshot = savedInstanceState?.getString("exportSnapshot")
+        scanTarget = savedInstanceState?.getString("scanTarget")?.let { value ->
+            ScanTarget.entries.firstOrNull { it.name == value }
+        }
+        binding.edgeMenuButton.restoreAnchor(savedInstanceState?.getBoolean("menuLeft") ?: false,
+            savedInstanceState?.getFloat("menuHeight", 0.68f) ?: 0.68f)
         if (savedInstanceState?.getBoolean("editor") == true) {
             showEditor(config.profiles.firstOrNull { it.id == savedInstanceState.getString("editingId") })
             binding.nameInput.setText(savedInstanceState.getString("draftName"))
             binding.websiteInput.setText(savedInstanceState.getString("draftUrl"))
             binding.scriptInput.setText(savedInstanceState.getString("draftScript"))
+            binding.userAgentInput.setText(savedInstanceState.getString("draftUserAgent", defaultUserAgent))
         } else if (savedInstanceState?.getBoolean("manager") == true) showProfiles() else launchLast()
     }
 
@@ -128,6 +175,135 @@ class MainActivity : AppCompatActivity() {
         binding.statusPanel.visibility = if (next == Screen.LOADING || next == Screen.ERROR) View.VISIBLE else View.GONE
         binding.settingsButton.visibility = if (next in listOf(Screen.BROWSER, Screen.LOADING, Screen.ERROR)) View.VISIBLE else View.GONE
         binding.refreshButton.visibility = if (next == Screen.BROWSER) View.VISIBLE else View.GONE
+        binding.titleBar.visibility = if (next == Screen.BROWSER) View.GONE else View.VISIBLE
+        binding.menuLayer.visibility = if (next == Screen.BROWSER) View.VISIBLE else View.GONE
+        if (next == Screen.BROWSER) binding.edgeMenuButton.wake()
+        updateChrome()
+    }
+
+    private fun updateChrome() {
+        if (!::binding.isInitialized) return
+        val immersive = screen == Screen.BROWSER && scanTarget == null && nativeDialog == null
+        WindowCompat.getInsetsController(window, binding.root).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            if (immersive) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = if (screen == Screen.BROWSER)
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                else WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+            }
+        }
+        ViewCompat.requestApplyInsets(binding.root)
+    }
+
+    private fun showNativeDialog(dialog: Dialog) {
+        nativeDialog?.dismiss()
+        nativeDialog = dialog
+        dialog.setOnDismissListener {
+            if (nativeDialog === dialog) {
+                nativeDialog = null
+                updateChrome()
+            }
+        }
+        updateChrome()
+        dialog.show()
+        dialog.window?.let { dialogWindow ->
+            WindowCompat.getInsetsController(dialogWindow, dialogWindow.decorView)
+                .show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    private fun showBrowserMenu() {
+        if (screen != Screen.BROWSER) return
+        binding.edgeMenuButton.wake()
+        val menu = DialogBrowserMenuBinding.inflate(layoutInflater)
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(menu.root)
+        menu.menuProfileName.text = currentProfile()?.name ?: getString(R.string.app_name)
+        menu.menuSwitch.setOnClickListener { dialog.dismiss(); showProfilePicker() }
+        menu.menuScan.setOnClickListener { dialog.dismiss(); startScan(ScanTarget.COPY) }
+        menu.menuRefresh.setOnClickListener { dialog.dismiss(); currentProfile()?.let { openProfile(it) } }
+        menu.menuSettings.setOnClickListener { dialog.dismiss(); showProfiles() }
+        menu.menuClose.setOnClickListener { dialog.dismiss() }
+        dialog.setCanceledOnTouchOutside(true)
+        showNativeDialog(dialog)
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setGravity(Gravity.BOTTOM)
+            setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0.25f)
+        }
+    }
+
+    private fun showProfilePicker() {
+        val profiles = config.profiles
+        val selected = profiles.indexOfFirst { it.id == currentId }
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.switch_configuration)
+            .setSingleChoiceItems(profiles.map { it.name }.toTypedArray(), selected) { picker, index ->
+                picker.dismiss()
+                val profile = profiles[index]
+                if (profile.id == currentId && webView != null && pageReady) returnToPage() else openProfile(profile)
+            }.setNegativeButton(R.string.cancel, null).create()
+        showNativeDialog(dialog)
+    }
+
+    private fun startScan(target: ScanTarget) {
+        if (scanTarget != null) return
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
+            toast(getString(R.string.camera_unavailable))
+            return
+        }
+        hideKeyboard()
+        scanTarget = target
+        updateChrome()
+        val options = ScanOptions().setCaptureActivity(QrScannerActivity::class.java)
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt(getString(R.string.scan_prompt))
+            .setOrientationLocked(false)
+            .setBeepEnabled(false)
+            .setBarcodeImageEnabled(false)
+            .addExtra(Intents.Scan.SHOW_MISSING_CAMERA_PERMISSION_DIALOG, false)
+        try { scanner.launch(options) } catch (error: Exception) {
+            scanTarget = null
+            updateChrome()
+            toast(getString(R.string.operation_error, error.message.orEmpty()))
+        }
+    }
+
+    private fun applyScanResult(target: ScanTarget, content: String) {
+        if (target == ScanTarget.COPY) {
+            val dialog = AlertDialog.Builder(this).setTitle(R.string.scan_result).setMessage(content)
+                .setPositiveButton(R.string.copy) { _, _ ->
+                    (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText(getString(R.string.scan_result), content))
+                    if (Build.VERSION.SDK_INT < 33) toast(getString(R.string.copied))
+                }
+                .setNeutralButton(R.string.scan_again) { _, _ -> startScan(ScanTarget.COPY) }
+                .setNegativeButton(R.string.close, null).create()
+            showNativeDialog(dialog)
+            return
+        }
+        val address = try { AppConfig.normalizeUrl(content) } catch (_: IllegalArgumentException) {
+            toast(getString(R.string.scan_invalid))
+            return
+        }
+        // Return to the same editor; scanner never saves or opens a URL automatically.
+        val field = if (target == ScanTarget.WEBSITE) binding.websiteInput else binding.scriptInput
+        field.setText(address)
+        field.error = null
+    }
+
+    private fun showCameraPermissionHelp() {
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.camera_permission_title)
+            .setMessage(R.string.camera_permission_message)
+            .setPositiveButton(R.string.open_system_settings) { _, _ ->
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            }.setNegativeButton(R.string.close, null).create()
+        showNativeDialog(dialog)
     }
 
     private fun cancelDownload() {
@@ -176,9 +352,11 @@ class MainActivity : AppCompatActivity() {
         binding.nameInput.setText(profile?.name.orEmpty())
         binding.websiteInput.setText(profile?.url.orEmpty())
         binding.scriptInput.setText(profile?.scriptUrl.orEmpty())
+        binding.userAgentInput.setText(profile?.userAgent ?: defaultUserAgent)
         binding.nameInput.error = null
         binding.websiteInput.error = null
         binding.scriptInput.error = null
+        binding.userAgentInput.error = null
         binding.saveButton.setText(R.string.save_profile)
         binding.cancelButton.setText(R.string.back_profiles)
         binding.cancelButton.visibility = View.VISIBLE
@@ -193,7 +371,10 @@ class MainActivity : AppCompatActivity() {
         val scriptUrl = try { AppConfig.normalizeUrl(binding.scriptInput.text.toString()) } catch (error: IllegalArgumentException) {
             binding.scriptInput.error = error.message; return
         }
-        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl)
+        val userAgent = try { AppConfig.normalizeUserAgent(binding.userAgentInput.text.toString()) } catch (error: IllegalArgumentException) {
+            binding.userAgentInput.error = error.message; return
+        }
+        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent)
         val next = try { config.upsert(profile).select(profile.id) } catch (error: Exception) {
             toast(error.message.orEmpty()); return
         }
@@ -223,7 +404,7 @@ class MainActivity : AppCompatActivity() {
         }
         val request = generation
         try {
-            scriptLoader.load(profile.scriptUrl) { result ->
+            scriptLoader.load(profile.scriptUrl, profile.userAgent) { result ->
                 if (!isDestroyed && request == generation) {
                     result.fold(onSuccess = { script ->
                         try {
@@ -250,6 +431,7 @@ class MainActivity : AppCompatActivity() {
         webView = view
         binding.webContainer.addView(view, android.widget.FrameLayout.LayoutParams(-1, -1))
         view.settings.apply {
+            userAgentString = profile.userAgent
             javaScriptEnabled = true
             domStorageEnabled = true
             cacheMode = WebSettings.LOAD_DEFAULT
@@ -381,7 +563,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         output.toString()
                     }
-                val imported = ConfigCodec.decode(text)
+                val imported = ConfigCodec.decode(text, defaultUserAgent)
                 runOnUiThread {
                     if (!isDestroyed) AlertDialog.Builder(this).setTitle(R.string.import_title)
                         .setMessage(getString(R.string.import_message, imported.profiles.size))
@@ -402,8 +584,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmExit() {
-        AlertDialog.Builder(this).setTitle(R.string.exit_title).setMessage(R.string.exit_message)
-            .setNegativeButton(R.string.stay, null).setPositiveButton(R.string.exit) { _, _ -> finish() }.show()
+        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.exit_title).setMessage(R.string.exit_message)
+            .setNegativeButton(R.string.stay, null).setPositiveButton(R.string.exit) { _, _ -> finish() }.create())
     }
 
     private fun hideKeyboard() {
@@ -438,11 +620,22 @@ class MainActivity : AppCompatActivity() {
         outState.putString("draftName", binding.nameInput.text.toString())
         outState.putString("draftUrl", binding.websiteInput.text.toString())
         outState.putString("draftScript", binding.scriptInput.text.toString())
+        outState.putString("draftUserAgent", binding.userAgentInput.text.toString())
+        outState.putString("scanTarget", scanTarget?.name)
+        outState.putBoolean("menuLeft", binding.edgeMenuButton.leftEdge)
+        outState.putFloat("menuHeight", binding.edgeMenuButton.heightFraction)
     }
 
     override fun onPause() { webView?.onPause(); CookieManager.getInstance().flush(); super.onPause() }
-    override fun onResume() { super.onResume(); webView?.onResume() }
+    override fun onResume() { super.onResume(); webView?.onResume(); updateChrome() }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) updateChrome()
+    }
     override fun onDestroy() {
+        nativeDialog?.setOnDismissListener(null)
+        nativeDialog?.dismiss()
+        nativeDialog = null
         cancelDownload()
         worker.shutdownNow()
         destroyWebView()

@@ -25,7 +25,7 @@ class BrowserScriptLoader(
     private var timeout: Runnable? = null
 
     @SuppressLint("SetJavaScriptEnabled")
-    fun load(url: String, callback: (Result<String>) -> Unit) {
+    fun load(url: String, userAgent: String, callback: (Result<String>) -> Unit) {
         close()
         val parsed = URI(url)
         val origin = URI(parsed.scheme.lowercase(), null, parsed.host.lowercase(), parsed.port, null, null, null).toString()
@@ -35,6 +35,7 @@ class BrowserScriptLoader(
         loader.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         container.addView(loader, ViewGroup.LayoutParams(1, 1))
         loader.settings.apply {
+            userAgentString = userAgent
             javaScriptEnabled = true
             cacheMode = WebSettings.LOAD_DEFAULT
             allowFileAccess = false
