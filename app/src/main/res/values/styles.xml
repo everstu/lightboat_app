@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Lightboat" parent="Theme.AppCompat.Light.NoActionBar">
+    <style name="Base.Theme.Lightboat" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="colorPrimary">@color/accent</item>
         <item name="colorAccent">@color/accent</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:statusBarColor">@color/paper</item>
-        <item name="android:navigationBarColor">@color/paper</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:navigationBarColor">@color/ink</item>
         <item name="android:windowBackground">@color/paper</item>
     </style>
+    <style name="Theme.Lightboat" parent="Base.Theme.Lightboat" />
     <style name="FieldLabel">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
