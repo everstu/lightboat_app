@@ -9,7 +9,7 @@ class ProfileRequestInterceptor(private val userAgent: String, private val netwo
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
         if (request.url.scheme !in setOf("http", "https") || request.method !in setOf("GET", "HEAD")) return null
         val actual = request.requestHeaders.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value
-        if (actual == null || actual == userAgent || request.url.host == "127.0.0.1") return null
+        if (actual == userAgent || request.url.host == "127.0.0.1") return null
         return try {
             val response = network.execute(request.url.toString(), request.method, request.requestHeaders)
             val mime = response.header("Content-Type").orEmpty().substringBefore(';').ifBlank { "application/octet-stream" }

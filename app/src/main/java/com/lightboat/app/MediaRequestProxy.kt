@@ -55,10 +55,11 @@ class MediaRequestProxy(private val network: ProfileRequestClient) : NanoHTTPD("
         val referer = session.parameters["ref"]?.singleOrNull().orEmpty()
         val uri = runCatching { URI(remote) }.getOrNull()
         val host = uri?.host?.lowercase()?.removeSurrounding("[", "]")
-        if (remote.length > 8192 || uri?.scheme !in setOf("http", "https") || host == null || uri.rawUserInfo != null ||
+        if (remote.length > 8192 || uri?.scheme !in setOf("http", "https") || host == null || uri?.rawUserInfo != null ||
             host == "localhost" || isLoopback(host)) {
             return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Invalid media URL")
         }
+        val remoteUri = requireNotNull(uri)
         return try {
             val headers = linkedMapOf<String, String>()
             // Never forward loopback Host, cookies, Origin, credentials, or the player's UA.
@@ -72,7 +73,7 @@ class MediaRequestProxy(private val network: ProfileRequestClient) : NanoHTTPD("
             val upstream = network.execute(remote, session.method.name, headers)
             val body = upstream.body ?: run { network.release(upstream); error("Empty response") }
             val mime = upstream.header("Content-Type").orEmpty().substringBefore(';').ifBlank { "application/octet-stream" }
-            val playlist = upstream.isSuccessful && session.method == Method.GET && (uri.path.endsWith(".m3u8", true) ||
+            val playlist = upstream.isSuccessful && session.method == Method.GET && (remoteUri.path.endsWith(".m3u8", true) ||
                 mime.lowercase() in setOf("application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl"))
             val status = object : Response.IStatus {
                 override fun getRequestStatus() = upstream.code
