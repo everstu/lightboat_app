@@ -20,6 +20,7 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
 import android.webkit.ConsoleMessage
+import android.webkit.PermissionRequest
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -87,6 +88,7 @@ class MainActivity : AppCompatActivity() {
     private var settingsInfoInitialized = false
     private val nativeGuardScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("native-guard.js") }
     private val clipboardSupportScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("clipboard-support.js") }
+    private val mediaDiagnosticsScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("media-diagnostics.js") }
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
     private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
@@ -598,6 +600,17 @@ class MainActivity : AppCompatActivity() {
 
             override fun onHideCustomView() { if (isCurrentNavigation()) fullscreenPlayer.hide() }
 
+            override fun onPermissionRequest(request: PermissionRequest) {
+                val protectedMedia = request.resources.filter {
+                    it == PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID
+                }.toTypedArray()
+                if (isCurrentNavigation() && request.origin.scheme == "https" && protectedMedia.isNotEmpty()) {
+                    request.grant(protectedMedia)
+                } else {
+                    request.deny()
+                }
+            }
+
             override fun onProgressChanged(view: WebView, progress: Int) {
                 if (!isCurrentNavigation() || pageFailed) return
                 updatePageProgress(progress, progress < 100)
@@ -681,6 +694,7 @@ class MainActivity : AppCompatActivity() {
         }
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, guard, setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupportScript, setOf("*"))
+        scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, mediaDiagnosticsScript, setOf("*"))
         userScriptHost = UserScriptHost(this, view, profile, bundle)
         scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
@@ -699,6 +713,7 @@ class MainActivity : AppCompatActivity() {
                 userAgentString = userAgent
                 javaScriptEnabled = true
                 domStorageEnabled = true
+                databaseEnabled = true
                 cacheMode = WebSettings.LOAD_DEFAULT
                 useWideViewPort = true
                 loadWithOverviewMode = true
@@ -709,7 +724,8 @@ class MainActivity : AppCompatActivity() {
                 javaScriptCanOpenWindowsAutomatically = false
                 allowFileAccess = false
                 allowContentAccess = false
-                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                // Legacy HLS manifests may still reference HTTP media segments from an HTTPS page.
+                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 // The site controls its playlist; don't require another tap for every next item.
                 mediaPlaybackRequiresUserGesture = false
             }

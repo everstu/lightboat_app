@@ -64,7 +64,7 @@ notification 目前是原生应用内文字 Toast，拒绝点击回调、图片�
 
 `GM_download`、`GM_cookie`、`GM_webRequest`、`GM_getTab`/`GM_saveTab`/`GM_getTabs`、独立标签页 `GM_openInTab`、扩展安装/自动更新、真正安全 sandbox 及系统通知并不支持。未知 grant 会写入警告；openInTab 明确抛错。不能宣称“100% 油猴兼容”。
 
-悬浮菜单 → **脚本日志** 可查看准备后的运行时机、授权、运行结果、错误栈/行号、浏览器错误及 GM 请求失败。最多保留当前 WebView 的 100 条日志，不上传；刷新/切换后清空。`@match` 不符合的网址和 iframe 不执行脚本。
+悬浮菜单 → **脚本日志** 可查看准备后的运行时机、主页面/iframe、页面地址、运行结果、错误栈/行号、浏览器错误、媒体元素错误及 GM 请求失败。最多保留当前 WebView 的 100 条日志，不上传；刷新/切换后清空。`@match` 不符合的网址和 iframe 不执行脚本。
 
 用户贴出的 grant-none 脚本会改为默认 document-idle，避免 head/body 为空时立即报错。它本身的普通 fetch 不会转换成 GM 请求，仍可能因为服务器 CORS、站点改版、未知全局变量或脚本自身逻辑而失败。
 

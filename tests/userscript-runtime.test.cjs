@@ -69,6 +69,8 @@ test('Default idle execution waits for a body and executes once after DOMContent
   h.ready(); await new Promise(resolve => setTimeout(resolve, 5));
   assert.equal(h.context.window.runs, 1);
   assert.equal(h.document.body.appended, true);
+  const executed = h.messages.find(message => message.op === 'log' && message.text.includes('已执行'));
+  assert.match(executed.text, /主页面；example\.com\/page/);
 });
 
 test('Document-start runs immediately, document-body waits only for the body', () => {
@@ -101,6 +103,14 @@ test('Non-matching pages and noframes do not contact the native bridge or execut
     assert.equal(h.context.window.started, undefined);
     assert.equal(h.messages.length, 0);
   }
+});
+
+test('Execution logs distinguish matching child frames', async () => {
+  const h = harness({ grant: ['none'] }, { frame: true, state: 'complete' });
+  h.run('window.started=true;');
+  await new Promise(resolve => setTimeout(resolve, 5));
+  const executed = h.messages.find(message => message.op === 'log' && message.text.includes('已执行'));
+  assert.match(executed.text, /iframe；example\.com\/page/);
 });
 
 test('Legacy storage is synchronous after fresh native snapshot and updates listeners', async () => {

@@ -243,8 +243,13 @@ function LightboatRuntime(spec, entry) {
   if (permitted('GM_openInTab') || permitted('GM.openInTab')) report('warning', '独立标签页暂不支持；GM_openInTab 调用将报错');
   if (meta['sandbox'] || meta['run-in'] || meta['webRequest']) report('warning', '@sandbox/@run-in/@webRequest 扩展隔离指令暂不支持');
   const args = spec.parameters.map(name => scope[name]);
+  const executionContext = (() => {
+    let page = location.hostname + location.pathname;
+    if (page.length > 160) page = page.slice(0, 157) + '...';
+    return (window === window.top ? '主页面' : 'iframe') + '；' + page;
+  })();
   const run = () => {
-    try { entry.apply(window, args); report('info', meta.name + ' 已执行（' + meta.runAt + '）'); }
+    try { entry.apply(window, args); report('info', meta.name + ' 已执行（' + meta.runAt + '；' + executionContext + '）'); }
     catch (error) { report('error', errorText(error)); }
   };
   const schedule = () => {

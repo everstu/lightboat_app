@@ -36,6 +36,7 @@ jobs:
           node tests/native-guard.test.cjs
           node --test tests/fetch-script.test.cjs
           node --test tests/clipboard-support.test.cjs
+          node --test tests/media-diagnostics.test.cjs
           node --test tests/userscript-runtime.test.cjs
       - name: Build, test and lint debug APK
         run: |
