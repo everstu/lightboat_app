@@ -113,13 +113,17 @@ WebView 运行器不是浏览器扩展，完整接口、边界和未实现能力
 
 ## 浏览体验与范围
 
-硬件加速、DOM Storage、HTTP 缓存及 Cookie；加载进度与 Android 返回键网页历史。屏蔽 WebView 长按、文本操作工具条、右键菜单、正文选择、拖拽和剪切/粘贴事件及快捷键；保留点击、滚动、普通键盘输入、光标和网页自身的复制功能。配置编辑器允许正常复制粘贴。
+硬件加速、DOM Storage、HTTP 缓存及 Cookie；加载进度与 Android 返回键网页历史。允许站点在首次播放后自动切换下一段视频/音频，并允许跨域 iframe 播放器保存登录态、进度和连播会话 Cookie。屏蔽 WebView 长按、文本操作工具条、右键菜单、正文选择、拖拽和剪切/粘贴事件及快捷键；保留点击、滚动、普通键盘输入、光标和网页自身的复制功能。配置编辑器允许正常复制粘贴。
+
+打开配置管理、脚本命令或应用内弹窗时，当前 WebView 不重建，并保留原有布局尺寸，减少返回网页时的重排、白屏和媒体状态抖动。Activity 只有完全不可见时才暂停 WebView，短暂失去焦点不会反复暂停/恢复播放器。切换到其他配置、刷新入口或系统回收进程仍会重新创建页面。
 
 网页 `copy` 事件、`document.execCommand('copy')` 和复制快捷键不再被应用拦截；支持 HTTPS（及安全的本机 HTTP 地址）下用户点击触发的 `navigator.clipboard.writeText()`，最多 64 Ki 字符。复制接口同时检查网页用户激活状态和近期原生触摸/键盘事件，不允许无交互的后台复制，也不新增读取剪贴板、图片或富文本复制能力。普通 HTTP 网页可继续使用浏览器允许的旧式复制方式。
 
 播放器通过 WebView 的 `onShowCustomView` / `onHideCustomView` 进入原生全屏层，自动切为横屏、保持屏幕常亮并隐藏悬浮菜单。播放器退出、右上角关闭按钮或 Android 返回键均先退出播放全屏，恢复之前的屏幕方向和悬浮菜单，保留同一个网页。页面跳转、错误及 WebView 销毁时也清理播放器全屏。支持触发标准视频/HTML 全屏接口的播放器；站点自定义 CSS 全屏或没有调用全屏接口的横屏按钮仍由站点自身控制。
 
 实际性能取决于网页、脚本、网络和设备，不能保证任意网页等同纯原生界面的性能。没有强改页面 viewport 或滚动布局。
+
+没有开启离屏预栅格、大内存模式或主动预下载下一段媒体：这些做法会显著增加内存、流量和耗电。WebView 默认已将可见渲染进程设为重要优先级；应用保留该策略。进入后台或锁屏后仍会暂停 WebView，真正的后台音频需要前台媒体服务和系统通知，不属于当前网页播放模式。
 
 未扩展网页的相机/麦克风/定位、文件上传、下载、外部 App 跳转或独立新窗口功能。配置之间共享 WebView 的 Cookie、存储和缓存，不提供多账号隔离。无需存储权限。
 
@@ -151,5 +155,6 @@ Android 编译、Lint、Kotlin 测试由 GitHub Actions 执行。真机验收重
 11. 视频全屏切横屏；播放器退出、应用关闭按钮和 Android 返回键均恢复原方向且不重载网页；检查跨域 iframe 播放器、暂停/恢复及全屏中页面跳转。
 12. 油猴脚本无 run-at 时等 DOM 就绪；match/exclude/noframes 正常，require/resource 准备正确，GM 存储重启后保留，命令和日志可查看。
 13. 长按拖动配置排序并自动滚动，重启/导出后顺序保留，启动项不变；右下角新增按钮不随列表滚走，也不会挡住最后一项操作。
+14. 播放列表自动切换下一段视频/音频不要求重复点击；跨域 iframe 播放器保持会话。打开配置页再返回，播放位置和网页布局不重建；切到后台后媒体暂停，返回后可继续。
 
 参考：[提前注入接口](https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)) · [WebView HTTP(S) base URL](https://developer.android.com/reference/android/webkit/WebView#loadDataWithBaseURL(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String))。

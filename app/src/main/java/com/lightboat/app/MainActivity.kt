@@ -201,7 +201,11 @@ class MainActivity : AppCompatActivity() {
         screen = next
         binding.configPanel.visibility = if (next == Screen.EDITOR) View.VISIBLE else View.GONE
         binding.profilesPanel.visibility = if (next == Screen.PROFILES) View.VISIBLE else View.GONE
-        binding.browserPanel.visibility = if (next == Screen.BROWSER || next == Screen.LOADING) View.VISIBLE else View.GONE
+        binding.browserPanel.visibility = when {
+            next == Screen.BROWSER || next == Screen.LOADING -> View.VISIBLE
+            webView != null && pageReady -> View.INVISIBLE
+            else -> View.GONE
+        }
         binding.statusPanel.visibility = if (next == Screen.LOADING || next == Screen.ERROR) View.VISIBLE else View.GONE
         binding.settingsButton.visibility = if (next in listOf(Screen.BROWSER, Screen.LOADING, Screen.ERROR)) View.VISIBLE else View.GONE
         binding.refreshButton.visibility = if (next == Screen.BROWSER) View.VISIBLE else View.GONE
@@ -546,9 +550,14 @@ class MainActivity : AppCompatActivity() {
             allowFileAccess = false
             allowContentAccess = false
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            mediaPlaybackRequiresUserGesture = true
+            // The site controls its playlist; don't require another tap for every next item.
+            mediaPlaybackRequiresUserGesture = false
         }
-        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            // Embedded players commonly need their own session/progress cookie.
+            setAcceptThirdPartyCookies(view, true)
+        }
         view.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                 if (view === webView) userScriptHost?.console(message)
@@ -772,11 +781,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         if (screen == Screen.PROFILES) commitProfileOrder()
-        webView?.onPause()
-        CookieManager.getInstance().flush()
         super.onPause()
     }
-    override fun onResume() { super.onResume(); webView?.onResume(); updateChrome() }
+    override fun onStart() {
+        super.onStart()
+        webView?.onResume()
+    }
+    override fun onResume() { super.onResume(); updateChrome() }
+    override fun onStop() {
+        webView?.onPause()
+        CookieManager.getInstance().flush()
+        super.onStop()
+    }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) updateChrome()
