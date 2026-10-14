@@ -45,7 +45,7 @@ class BrowserScriptLoader(
         loadInternal(url, userAgent, platform, if (resource) "resource" else "require", callback)
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "RestrictedApi")
     private fun loadInternal(url: String, userAgent: String, platform: BrowserPlatform, mode: String,
         callback: (Result<JSONObject>) -> Unit) {
         cancel()

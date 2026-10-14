@@ -746,7 +746,7 @@ class MainActivity : AppCompatActivity() {
         view.loadUrl(profile.url)
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "RestrictedApi")
     private fun prepareMainWebView(profile: Profile) {
         val userAgent = profile.userAgent
         val view = webView ?: AppWebView(this).also {
