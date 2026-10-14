@@ -2,8 +2,9 @@
   const send = message => LightboatLoader.postMessage(JSON.stringify(message));
   try {
     const mode = typeof assetMode === 'undefined' ? 'script' : assetMode;
-    // Chromium owns storage, freshness, ETag validation and eviction.
-    const response = await fetch(scriptUrl, { cache: 'default', credentials: 'same-origin' });
+    // Force a fresh script for every configuration launch. Chromium still owns
+    // cookies, connections and storage; no script body is persisted by us.
+    const response = await fetch(scriptUrl, { cache: 'no-store', credentials: 'same-origin' });
     if (!response.ok) throw new Error(`脚本服务器返回 HTTP ${response.status}`);
     const contentType = response.headers.get('Content-Type') || '';
     const mime = contentType.split(';')[0].trim().toLowerCase();

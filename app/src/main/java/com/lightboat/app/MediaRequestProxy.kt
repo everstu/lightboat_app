@@ -66,7 +66,7 @@ internal class MediaRequestProxy(
         return try {
             val headers = linkedMapOf<String, String>()
             // Never forward loopback Host, cookies, Origin, credentials, or the player's UA.
-            listOf("range", "if-range", "if-none-match", "if-modified-since", "accept").forEach { name ->
+            listOf("range", "if-range", "accept").forEach { name ->
                 session.headers[name]?.let { headers[name] = it }
             }
             if (referer.length <= 8192 && runCatching { URI(referer).scheme in setOf("http", "https") }.getOrDefault(false)) {
@@ -100,14 +100,13 @@ internal class MediaRequestProxy(
             }
             upstream.headers.forEach { (name, value) ->
                 if (name.lowercase() !in setOf("content-length", "content-type", "content-encoding", "transfer-encoding", "connection",
-                        "set-cookie", "location", "content-security-policy", "etag", "last-modified",
-                        "access-control-allow-origin", "access-control-allow-credentials") &&
-                    (!playlist || name.lowercase() !in setOf("cache-control", "expires"))) result.addHeader(name, value)
+                        "set-cookie", "location", "content-security-policy", "etag", "last-modified", "cache-control", "expires", "pragma",
+                        "access-control-allow-origin", "access-control-allow-credentials")) result.addHeader(name, value)
             }
             result.addHeader("Access-Control-Allow-Origin", "*")
-            // Rewritten playlists belong only to this server/session; other media can
-            // retain upstream cache headers and also benefits from the upstream cache.
-            if (playlist) result.addHeader("Cache-Control", "no-store")
+            // Neither the WebView nor the native proxy stores media bodies.
+            // Connection reuse still keeps consecutive segments responsive.
+            result.addHeader("Cache-Control", "no-store")
             result
         } catch (_: Exception) {
             // Fail closed: never retry the original URL with the system media UA.

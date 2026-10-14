@@ -4,7 +4,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import java.io.ByteArrayInputStream
 
-/** Chromium keeps its own cache/body handling unless a GET/HEAD has the wrong UA. */
+/** Replays mismatched-UA GET/HEAD requests with the selected profile identity. */
 class ProfileRequestInterceptor(private val userAgent: String, private val network: ProfileRequestClient) {
     fun intercept(request: WebResourceRequest): WebResourceResponse? {
         if (request.url.scheme !in setOf("http", "https") || request.method !in setOf("GET", "HEAD")) return null
@@ -15,7 +15,10 @@ class ProfileRequestInterceptor(private val userAgent: String, private val netwo
             val mime = response.header("Content-Type").orEmpty().substringBefore(';').ifBlank { "application/octet-stream" }
             val encoding = response.body?.contentType()?.charset()?.name() ?: "UTF-8"
             val headers = response.headers.toMultimap().mapValues { it.value.joinToString(", ") }
-                .filterKeys { it.lowercase() !in setOf("set-cookie", "content-encoding", "transfer-encoding", "connection") }
+                .filterKeys { it.lowercase() !in setOf(
+                    "set-cookie", "content-encoding", "transfer-encoding", "connection",
+                    "cache-control", "expires", "etag", "last-modified"
+                ) }
             WebResourceResponse(mime, encoding, response.code, response.message.ifBlank { "Response" }, headers, network.stream(response))
         } catch (_: Exception) {
             // Do not leak a second, differently identified request by falling back.

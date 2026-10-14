@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -58,6 +59,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 import com.lightboat.app.userscript.ScriptBundle
 import com.lightboat.app.userscript.ScriptPreparer
@@ -74,8 +76,18 @@ class MainActivity : AppCompatActivity() {
     private var mediaProxy: MediaRequestProxy? = null
     private var profileNetwork: ProfileRequestClient? = null
     @Volatile private var requestInterceptor: ProfileRequestInterceptor? = null
-    private val mediaCache by lazy { okhttp3.Cache(java.io.File(cacheDir, "media-http"), 64L * 1024 * 1024) }
-    private val httpTransport by lazy { okhttp3.OkHttpClient.Builder().cache(mediaCache).build() }
+    /** Shared connection transport: keep TCP/TLS reuse, but never store HTTP bodies. */
+    private val httpTransport by lazy {
+        val dispatcher = okhttp3.Dispatcher().apply {
+            maxRequests = 32
+            maxRequestsPerHost = 8
+        }
+        okhttp3.OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
+            .retryOnConnectionFailure(true)
+            .build()
+    }
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
     private var generation = 0
@@ -84,7 +96,6 @@ class MainActivity : AppCompatActivity() {
     private var editingId: String? = null
     private var pageFailed = false
     private var pageReady = false
-    private var resetHistoryOnCommit = false
     private var screen = Screen.PROFILES
     private var exportSnapshot: String? = null
     private var scanTarget: ScanTarget? = null
@@ -369,7 +380,7 @@ class MainActivity : AppCompatActivity() {
             .setSingleChoiceItems(profiles.map { it.name }.toTypedArray(), selected) { picker, index ->
                 picker.dismiss()
                 val profile = profiles[index]
-                if (profile.id == currentId && webView != null && pageReady) returnToPage() else openProfile(profile)
+                openProfile(profile)
             }.setNegativeButton(R.string.cancel, null).create()
         showNativeDialog(dialog)
     }
@@ -582,10 +593,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun openProfile(profile: Profile) {
         if (config.lastProfileId != profile.id && !persist(config.select(profile.id))) return
-        val navigationRequest = ++navigationGeneration
         hideKeyboard()
         cancelDownload()
-        prepareWebViewForProfile()
+        // Every launch/switch gets a clean browser and script-loader renderer.
+        // This prevents old document scripts, media sessions and renderer state
+        // from leaking into the selected configuration.
+        scriptLoader.close()
+        destroyWebView()
+        val navigationRequest = ++navigationGeneration
         currentId = profile.id
         showLoading(R.string.preparing)
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) ||
@@ -703,10 +718,6 @@ class MainActivity : AppCompatActivity() {
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 if (!isCurrentNavigation()) return
                 userScriptHost?.pageCommitted(url)
-                if (resetHistoryOnCommit) {
-                    view.clearHistory()
-                    resetHistoryOnCommit = false
-                }
                 revealPage(view)
             }
 
@@ -790,8 +801,7 @@ class MainActivity : AppCompatActivity() {
             view.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
-                databaseEnabled = true
-                cacheMode = WebSettings.LOAD_DEFAULT
+                cacheMode = WebSettings.LOAD_NO_CACHE
                 useWideViewPort = true
                 loadWithOverviewMode = true
                 builtInZoomControls = false
@@ -805,6 +815,11 @@ class MainActivity : AppCompatActivity() {
                 mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 // The site controls its playlist; don't require another tap for every next item.
                 mediaPlaybackRequiresUserGesture = false
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Keep the active renderer responsive while allowing the system
+                // to reclaim it when the activity is no longer visible.
+                view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true)
             }
             CookieManager.getInstance().apply {
                 setAcceptCookie(true)
@@ -838,25 +853,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun readAssetText(name: String) = assets.open(name).bufferedReader().use { it.readText() }
-
-    private fun prepareWebViewForProfile() {
-        fullscreenPlayer.hide()
-        userScriptHost?.close()
-        userScriptHost = null
-        scriptHandlers.forEach { runCatching { it.remove() } }
-        scriptHandlers.clear()
-        webView?.let { view ->
-            runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatClipboard") }
-            runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatGM") }
-            view.evaluateJavascript("document.querySelectorAll('video,audio').forEach(media => media.pause())", null)
-            view.stopLoading()
-            view.onPause()
-        }
-        closeProfileNetwork()
-        pageReady = false
-        pageFailed = false
-        resetHistoryOnCommit = true
-    }
 
     private fun revealPage(view: WebView) {
         if (view !== webView || pageFailed) return
@@ -968,7 +964,6 @@ class MainActivity : AppCompatActivity() {
         configuredWebView = null
         pageReady = false
         pageFailed = false
-        resetHistoryOnCommit = false
         navigationGeneration++
     }
 
@@ -1002,6 +997,7 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onStart() {
         super.onStart()
+        webView?.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true)
         webView?.onResume()
     }
     override fun onResume() { super.onResume(); updateChrome() }
@@ -1009,6 +1005,15 @@ class MainActivity : AppCompatActivity() {
         webView?.onPause()
         CookieManager.getInstance().flush()
         super.onStop()
+    }
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            // The activity is no longer visible. Let Chromium waive renderer
+            // priority so the system can reclaim renderer memory; onStart()
+            // restores foreground priority without clearing page storage.
+            webView?.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_WAIVED, true)
+        }
     }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)

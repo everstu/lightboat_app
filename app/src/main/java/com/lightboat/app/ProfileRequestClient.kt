@@ -21,11 +21,17 @@ class ProfileRequestClient(
     private val calls = ConcurrentHashMap.newKeySet<Call>()
     @Volatile private var closed = false
     private val client = base.newBuilder()
+        // The app intentionally does not use an OkHttp response cache. The
+        // connection pool is still shared by the active profile for low-latency
+        // redirects and media segments.
+        .cache(null)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .addNetworkInterceptor { chain ->
             val url = chain.request().url.toString()
             val request = chain.request().newBuilder().header("User-Agent", userAgent)
                 .removeHeader("X-Requested-With").removeHeader("Cookie")
+                .removeHeader("If-None-Match").removeHeader("If-Modified-Since")
+                .header("Cache-Control", "no-cache")
             cookies(url)?.let { request.header("Cookie", it) }
             val response = chain.proceed(request.build())
             response.headers("Set-Cookie").forEach { saveCookie(url, it) }
@@ -38,7 +44,8 @@ class ProfileRequestClient(
         val request = Request.Builder().url(url).method(method, null)
         headers.forEach { (name, value) ->
             if (name.lowercase() !in setOf("host", "connection", "content-length", "transfer-encoding",
-                    "accept-encoding", "cookie", "user-agent", "x-requested-with", "proxy-authorization")) {
+                    "accept-encoding", "cookie", "user-agent", "x-requested-with", "proxy-authorization",
+                    "if-none-match", "if-modified-since", "cache-control", "pragma")) {
                 request.header(name, value)
             }
         }

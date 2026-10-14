@@ -18,7 +18,7 @@ import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 import java.net.URI
 
-/** Fetches text through Chromium's HTTP cache, without executing downloaded code. */
+/** Fetches text through a short-lived Chromium WebView, without executing downloaded code. */
 class BrowserScriptLoader(
     private val context: Context,
     private val container: ViewGroup
@@ -66,7 +66,10 @@ class BrowserScriptLoader(
             loader.settings.apply {
                 userAgentString = userAgent
                 javaScriptEnabled = true
-                cacheMode = WebSettings.LOAD_DEFAULT
+                // A launch must observe the current script contents. Cookies and
+                // other Chromium storage remain available, but HTTP body cache
+                // entries are bypassed for this request.
+                cacheMode = WebSettings.LOAD_NO_CACHE
                 allowFileAccess = false
                 allowContentAccess = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW

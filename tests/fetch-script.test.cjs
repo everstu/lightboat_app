@@ -21,11 +21,11 @@ async function fetchScript(body, headers = { 'Content-Type': 'application/javasc
   return { message: messages[0], calls };
 }
 
-test('Uses browser default cache and returns raw code without executing it', async () => {
+test('Forces a fresh fetch and returns raw code without executing it', async () => {
   const code = 'throw new Error("This code must not execute in the loader");';
   const result = await fetchScript(code);
   assert.equal(result.message.script, code);
-  assert.deepEqual(result.calls, [{ url: scriptUrl, cache: 'default', credentials: 'same-origin' }]);
+  assert.deepEqual(result.calls, [{ url: scriptUrl, cache: 'no-store', credentials: 'same-origin' }]);
 });
 test('Decodes UTF-8 and retains Unicode and multiline source', async () => {
   const code = "window.name = '轻舟';\nwindow.ready = true;";

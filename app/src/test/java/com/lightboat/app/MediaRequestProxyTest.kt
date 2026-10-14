@@ -26,9 +26,10 @@ class MediaRequestProxyTest {
                     .header("User-Agent", "System Android UA").build()).execute().use { it.body!!.string() }
                 val segment = manifest.lineSequence().first { it.startsWith("http://127.0.0.1") }
                 browser.newCall(Request.Builder().url(segment).header("User-Agent", "System Android UA")
-                    .header("Range", "bytes=0-10").build()).execute().use {
+                    .header("Range", "bytes=0-10").header("If-None-Match", "old-response").build()).execute().use {
                     assertEquals(206, it.code)
                     assertEquals("bytes 0-10/100", it.header("Content-Range"))
+                    assertEquals("no-store", it.header("Cache-Control"))
                     assertEquals("video bytes", it.body!!.string())
                 }
                 repeat(3) { index ->
@@ -36,7 +37,10 @@ class MediaRequestProxyTest {
                     assertEquals(ua, request.getHeader("User-Agent"))
                     assertEquals("session=one", request.getHeader("Cookie"))
                     assertEquals("https://page.example/watch", request.getHeader("Referer"))
-                    if (index > 0) assertEquals("bytes=0-10", request.getHeader("Range"))
+                    if (index > 0) {
+                        assertEquals("bytes=0-10", request.getHeader("Range"))
+                        assertNull(request.getHeader("If-None-Match"))
+                    }
                 }
                 assertTrue(manifest.contains("URI=\"http://127.0.0.1:"))
             } finally { proxy.close(); network.close() }
