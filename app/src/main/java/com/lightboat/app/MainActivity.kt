@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity() {
             maxRequests = 32
             maxRequestsPerHost = 8
         }
-        okhttp3.OkHttpClient.Builder()
+        return okhttp3.OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
             .retryOnConnectionFailure(true)
