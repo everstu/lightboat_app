@@ -3,6 +3,7 @@ package com.lightboat.app.userscript
 import android.os.SystemClock
 import android.util.Base64
 import android.webkit.CookieManager
+import com.lightboat.app.DebugLog
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -27,6 +28,7 @@ class ScriptNetwork(private val meta: ScriptMetadata, private val userAgent: Str
         require(requests.size < 16) { "同时请求数量不能超过 16" }
         val target = details.getString("target")
         val requestMethod = details.optString("method", "GET").uppercase()
+        DebugLog.event("gm-xhr", "start method=$requestMethod url=${DebugLog.safeUrl(target)} responseType=${details.optString("responseType", "text")}")
         val request = Request()
         require(requests.putIfAbsent(key, request) == null) { "请求 ID 重复" }
         pool.execute task@ {
@@ -88,8 +90,10 @@ class ScriptNetwork(private val meta: ScriptMetadata, private val userAgent: Str
                             require(hop < 10) { "重定向次数过多" }
                             val location = connection.getHeaderField("Location") ?: error("重定向目标为空")
                             current = URI(current).resolve(location).toString()
+                            DebugLog.event("gm-xhr", "redirect status=$status to=${DebugLog.safeUrl(current)}")
                             if (status == 303 || ((status == 301 || status == 302) && method == "POST")) { method = "GET"; body = null }
                         } else {
+                            DebugLog.event("gm-xhr", "response status=$status url=${DebugLog.safeUrl(current)} type=${connection.contentType.orEmpty().substringBefore(';').take(80)}")
                             val rawHeaders = connection.headerFields.filterKeys { it != null }.entries.joinToString("\r\n") { (name, values) ->
                                 values.joinToString("\r\n") { "$name: $it" }
                             }
@@ -126,12 +130,14 @@ class ScriptNetwork(private val meta: ScriptMetadata, private val userAgent: Str
                                 .put("responseText", if (binary) "" else bytes.toString(charset))
                             if (binary) result.put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
                             event("load", result, null)
+                            DebugLog.event("gm-xhr", "load status=$status bytes=${bytes.size} final=${DebugLog.safeUrl(current)}")
                             return@task
                         }
                     } finally { connection.disconnect(); request.connection = null }
                 }
             } catch (error: Exception) {
                 val kind = when { request.stopped.get() -> "abort"; error is SocketTimeoutException -> "timeout"; else -> "error" }
+                DebugLog.event("gm-xhr", "$kind url=${DebugLog.safeUrl(current)} error=${error.message.orEmpty().take(240)}")
                 event(kind, null, error.message ?: "网络请求失败")
             } finally { requests.remove(key) }
         }

@@ -74,5 +74,13 @@ class ProfileRequestClient(
         response.close()
     }
 
-    fun close() { closed = true; calls.forEach { it.cancel() }; calls.clear() }
+    fun close() {
+        closed = true
+        calls.forEach { it.cancel() }
+        calls.clear()
+        client.dispatcher.cancelAll()
+        client.connectionPool.evictAll()
+        client.dispatcher.executorService.shutdownNow()
+        DebugLog.event("network", "profile transport closed")
+    }
 }

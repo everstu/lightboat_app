@@ -68,6 +68,9 @@ internal class MediaRequestProxy(
             return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Invalid media URL")
         }
         val remoteUri = requireNotNull(uri)
+        if (DebugLog.shouldTraceUrl(remote)) {
+            DebugLog.event("media", "${session.method.name} ${DebugLog.safeUrl(remote)} headers=${DebugLog.headersPresent(session.headers)}")
+        }
         return try {
             val headers = linkedMapOf<String, String>()
             // Never forward loopback Host, cookies, or the player's UA. Keep
@@ -81,6 +84,9 @@ internal class MediaRequestProxy(
             }
             session.headers["origin"]?.takeIf { it != "null" && !it.startsWith("http://127.0.0.1:") }?.let { headers["Origin"] = it }
             val upstream = network.execute(remote, session.method.name, headers)
+            if (DebugLog.shouldTraceUrl(remote)) {
+                DebugLog.event("media", "response ${session.method.name} ${DebugLog.safeUrl(remote)} status=${upstream.code} mime=${upstream.header("Content-Type").orEmpty().take(80)} length=${upstream.header("Content-Length").orEmpty().take(40)}")
+            }
             val status = object : Response.IStatus {
                 override fun getRequestStatus() = upstream.code
                 override fun getDescription() = "${upstream.code} ${upstream.message.ifBlank { "Response" }}"
@@ -124,6 +130,7 @@ internal class MediaRequestProxy(
             if (playlist) result.addHeader("Cache-Control", "no-store")
             result
         } catch (_: Exception) {
+            DebugLog.event("media", "failed ${session.method.name} ${DebugLog.safeUrl(remote)}")
             // Fail closed: never retry the original URL with the system media UA.
             newFixedLengthResponse(object : Response.IStatus {
                 override fun getRequestStatus() = 502

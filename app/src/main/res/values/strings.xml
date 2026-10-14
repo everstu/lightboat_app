@@ -88,5 +88,6 @@
     <string name="exit_player_fullscreen">退出播放器全屏</string>
     <string name="script_commands">脚本命令</string>
     <string name="script_logs">脚本日志</string>
+    <string name="debug_logs">调试日志</string>
     <string name="drag_profile">长按拖动配置排序</string>
 </resources>

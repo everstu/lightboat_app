@@ -48,6 +48,7 @@ class BrowserScriptLoader(
     @SuppressLint("SetJavaScriptEnabled", "RestrictedApi")
     private fun loadInternal(url: String, userAgent: String, platform: BrowserPlatform, mode: String,
         callback: (Result<JSONObject>) -> Unit) {
+        DebugLog.event("script-loader", "start mode=$mode url=${DebugLog.safeUrl(url)}")
         cancel()
         val parsed = URI(url)
         val origin = URI(parsed.scheme.lowercase(), null, parsed.host.lowercase(), parsed.port, null, null, null).toString()
@@ -91,6 +92,7 @@ class BrowserScriptLoader(
         activeRequest = request
         fun finish(result: Result<JSONObject>) {
             if (view !== loader || activeRequest != request) return
+            DebugLog.event("script-loader", "finish mode=$mode ok=${result.isSuccess} url=${DebugLog.safeUrl(url)} error=${result.exceptionOrNull()?.message.orEmpty().take(180)}")
             activeRequest = 0L
             timeout?.let { handler.removeCallbacks(it) }
             timeout = null
@@ -101,6 +103,7 @@ class BrowserScriptLoader(
         loader.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                DebugLog.event("script-loader", "network error url=${DebugLog.safeUrl(request.url.toString())} code=${error.errorCode} ${error.description}")
                 if (request.isForMainFrame) finish(Result.failure(IllegalStateException(error.description.toString())))
             }
             override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
@@ -119,7 +122,10 @@ class BrowserScriptLoader(
             }
             finish(result)
         }
-        timeout = Runnable { finish(Result.failure(IllegalStateException("脚本请求超时，请检查网络后重试"))) }
+        timeout = Runnable {
+            DebugLog.event("script-loader", "timeout mode=$mode url=${DebugLog.safeUrl(url)}")
+            finish(Result.failure(IllegalStateException("脚本请求超时，请检查网络后重试")))
+        }
             .also { handler.postDelayed(it, 30_000) }
         val quotedUrl = JSONObject.quote(url).replace("<", "\\u003c")
         val html = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body>" +

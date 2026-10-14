@@ -76,8 +76,8 @@ class MainActivity : AppCompatActivity() {
     private var mediaProxy: MediaRequestProxy? = null
     private var profileNetwork: ProfileRequestClient? = null
     @Volatile private var requestInterceptor: ProfileRequestInterceptor? = null
-    /** Shared connection transport: keep TCP/TLS reuse, but never store HTTP bodies. */
-    private val httpTransport by lazy {
+    /** One transport per profile session: reuse connections during playback, reset on refresh/switch. */
+    private fun createProfileTransport(): okhttp3.OkHttpClient {
         val dispatcher = okhttp3.Dispatcher().apply {
             maxRequests = 32
             maxRequestsPerHost = 8
@@ -146,6 +146,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DebugLog.initialize(this)
+        DebugLog.event("activity", "onCreate restored=${savedInstanceState != null}")
         WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -200,6 +202,7 @@ class MainActivity : AppCompatActivity() {
         binding.editButton.setOnClickListener { showProfiles() }
         binding.refreshButton.setOnClickListener { currentProfile()?.let { openProfile(it) } }
         binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchLast() }
+        binding.debugLogButton.setOnClickListener { showScriptLogs() }
         binding.addButton.setOnClickListener { showEditor(null) }
         binding.saveButton.setOnClickListener { saveEditor(false) }
         binding.saveOpenButton.setOnClickListener { saveEditor(true) }
@@ -353,14 +356,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun showScriptLogs() {
         val logView = android.widget.TextView(this).apply {
-            text = userScriptHost?.logText() ?: "暂无脚本日志"
+            text = DebugLog.read().ifBlank { "暂无应用调试日志" }
             setTextIsSelectable(true)
             setPadding(24, 16, 24, 16)
             textSize = 12f
         }
         val scroll = android.widget.ScrollView(this).apply { addView(logView) }
-        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.script_logs).setView(scroll)
-            .setPositiveButton(R.string.close, null).create())
+        val text = logView.text.toString()
+        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.debug_logs).setView(scroll)
+            .setPositiveButton(R.string.copy) { _, _ ->
+                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                    .setPrimaryClip(ClipData.newPlainText(getString(R.string.debug_logs), text))
+                if (Build.VERSION.SDK_INT < 33) toast(getString(R.string.copied))
+            }.setNegativeButton(R.string.close, null).create())
     }
 
     private fun showScriptCommands() {
@@ -442,6 +450,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun cancelDownload() {
         generation++
+        DebugLog.event("script", "cancel generation=$generation")
         scriptLoader.cancel()
     }
 
@@ -592,6 +601,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openProfile(profile: Profile) {
+        DebugLog.event("profile", "open name=${profile.name.take(80)} url=${DebugLog.safeUrl(profile.url)} script=${DebugLog.safeUrl(profile.scriptUrl)} platform=${profile.platform}")
         if (config.lastProfileId != profile.id && !persist(config.select(profile.id))) return
         hideKeyboard()
         cancelDownload()
@@ -603,15 +613,16 @@ class MainActivity : AppCompatActivity() {
         val navigationRequest = ++navigationGeneration
         currentId = profile.id
         showLoading(R.string.preparing)
+        DebugLog.event("profile", "new session navigation=$navigationRequest generation=$generation")
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) ||
             !WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             showError(R.string.unsupported_title, getString(R.string.unsupported_message))
             return
         }
-        prepareMainWebView(profile)
         val request = generation
         try {
             scriptLoader.load(profile.scriptUrl, profile.userAgent, profile.platform) { result ->
+                DebugLog.event("script", "load result=${if (result.isSuccess) "success" else "failure:${result.exceptionOrNull()?.message.orEmpty().take(180)}"} url=${DebugLog.safeUrl(profile.scriptUrl)}")
                 if (!isDestroyed && request == generation) {
                     result.fold(onSuccess = { script ->
                         try {
@@ -620,31 +631,44 @@ class MainActivity : AppCompatActivity() {
                             ) { prepared ->
                                 if (!isDestroyed && request == generation) {
                                     prepared.fold(onSuccess = { bundle ->
+                                        DebugLog.event("script", "prepared name=${bundle.metadata.name.take(100)} runAt=${bundle.metadata.runAt} grants=${bundle.metadata.grants.size} sourceBytes=${bundle.source.length}")
                                         scriptLoader.close()
-                                        try {
-                                            createWebView(profile, nativeGuardScript, bundle, navigationRequest)
-                                        } catch (error: Exception) {
-                                            destroyWebView()
-                                            showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
+                                        // Let Chromium finish destroying the short-lived loader
+                                        // before allocating the browsing WebView renderer.
+                                        binding.root.post {
+                                            if (!isDestroyed && request == generation && navigationRequest == navigationGeneration) {
+                                                try {
+                                                    prepareMainWebView(profile)
+                                                    createWebView(profile, nativeGuardScript, bundle, navigationRequest)
+                                                } catch (error: Exception) {
+                                                    DebugLog.event("webview", "create failed ${error.message.orEmpty().take(240)}")
+                                                    destroyWebView()
+                                                    showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
+                                                }
+                                            }
                                         }
                                     }, onFailure = { error ->
+                                        DebugLog.event("script", "prepare failed ${error.message.orEmpty().take(240)}")
                                         scriptLoader.close()
                                         showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
                                     })
                                 }
                             }
                         } catch (error: Exception) {
+                            DebugLog.event("script", "prepare exception ${error.message.orEmpty().take(240)}")
                             scriptLoader.close()
                             destroyWebView()
                             showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
                         }
                     }, onFailure = { error ->
+                        DebugLog.event("script", "download failed ${error.message.orEmpty().take(240)}")
                         scriptLoader.close()
                         showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
                     })
                 }
             }
         } catch (error: Exception) {
+            DebugLog.event("script", "load exception ${error.message.orEmpty().take(240)}")
             scriptLoader.close()
             showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
         }
@@ -652,13 +676,14 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(profile: Profile, guard: String, bundle: ScriptBundle, navigationRequest: Long) {
+        DebugLog.event("webview", "create navigation=$navigationRequest url=${DebugLog.safeUrl(profile.url)}")
         val view = webView ?: AppWebView(this).also {
             webView = it
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
         fun isCurrentNavigation() = view === webView && navigationRequest == navigationGeneration
         val cookies = CookieManager.getInstance()
-        val network = ProfileRequestClient(profile.userAgent, httpTransport,
+        val network = ProfileRequestClient(profile.userAgent, createProfileTransport(),
             cookies = { cookies.getCookie(it) }, saveCookie = { url, cookie -> cookies.setCookie(url, cookie) })
         profileNetwork = network
         val interceptor = ProfileRequestInterceptor(profile.userAgent, network)
@@ -697,7 +722,11 @@ class MainActivity : AppCompatActivity() {
         }
         view.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                interceptor.intercept(request)
+                interceptor.intercept(request).also {
+                    if (DebugLog.shouldTraceUrl(request.url.toString())) {
+                        DebugLog.event("web-request", "${request.method} ${DebugLog.safeUrl(request.url.toString())} ua=${request.requestHeaders.keys.any { it.equals("User-Agent", true) }} intercepted=${it != null}")
+                    }
+                }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!isCurrentNavigation()) return true
@@ -708,6 +737,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 if (!isCurrentNavigation()) return
+                DebugLog.event("page", "started ${DebugLog.safeUrl(url)}")
                 userScriptHost?.resetDocuments()
                 fullscreenPlayer.hide()
                 (view as AppWebView).clearClipboardGesture()
@@ -717,21 +747,25 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 if (!isCurrentNavigation()) return
+                DebugLog.event("page", "committed ${DebugLog.safeUrl(url)}")
                 userScriptHost?.pageCommitted(url)
                 revealPage(view)
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
                 if (!isCurrentNavigation() || pageFailed) return
+                DebugLog.event("page", "finished ${DebugLog.safeUrl(url)}")
                 revealPage(view)
                 updatePageProgress(100, false)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                DebugLog.event("page-error", "${request.method} ${DebugLog.safeUrl(request.url.toString())} code=${error.errorCode} ${error.description}")
                 if (request.isForMainFrame && isCurrentNavigation()) failPage(error.description.toString())
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                DebugLog.event("http-error", "${request.method} ${DebugLog.safeUrl(request.url.toString())} status=${response.statusCode}")
                 if (request.isForMainFrame && isCurrentNavigation()) {
                     failPage(getString(R.string.page_http_error, response.statusCode))
                 }
@@ -743,6 +777,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                DebugLog.event("webview", "renderer gone didCrash=${detail.didCrash()}")
                 if (view === webView) {
                     destroyWebView()
                     showError(R.string.page_error_title, getString(R.string.renderer_error))
@@ -862,6 +897,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun failPage(message: String) {
+        DebugLog.event("page-error", "main frame failed ${message.take(300)}")
         userScriptHost?.resetDocuments()
         fullscreenPlayer.hide()
         pageFailed = true
@@ -886,6 +922,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showError(title: Int, message: String) {
+        DebugLog.event("ui-error", "${getString(title)} ${message.take(300)}")
         showScreen(Screen.ERROR)
         binding.statusTitle.setText(title)
         binding.statusDetail.text = message
@@ -945,6 +982,7 @@ class MainActivity : AppCompatActivity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     private fun destroyWebView() {
+        DebugLog.event("webview", "destroy active=${webView != null} profile=${currentId.orEmpty()}")
         userScriptHost?.close()
         userScriptHost = null
         fullscreenPlayer.hide()
@@ -968,6 +1006,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun closeProfileNetwork() {
+        DebugLog.event("network", "close mediaProxy=${mediaProxy != null} profileNetwork=${profileNetwork != null}")
         requestInterceptor = null
         mediaProxy?.close()
         mediaProxy = null

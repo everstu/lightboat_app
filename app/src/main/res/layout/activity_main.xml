@@ -166,6 +166,9 @@
             <Button android:id="@+id/editButton" android:layout_width="match_parent" android:layout_height="52dp"
                 style="?attr/borderlessButtonStyle" android:text="@string/edit_addresses"
                 android:textColor="@color/accent" android:visibility="gone" />
+            <Button android:id="@+id/debugLogButton" android:layout_width="match_parent" android:layout_height="52dp"
+                style="?attr/borderlessButtonStyle" android:text="@string/debug_logs"
+                android:textColor="@color/accent" />
         </LinearLayout>
         <FrameLayout android:id="@+id/menuLayer" android:layout_width="match_parent" android:layout_height="match_parent"
             android:visibility="gone" android:clipChildren="true" android:clipToPadding="true">

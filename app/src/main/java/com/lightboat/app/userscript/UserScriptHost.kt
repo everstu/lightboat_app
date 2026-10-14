@@ -15,6 +15,7 @@ import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import com.lightboat.app.AppWebView
 import com.lightboat.app.Profile
+import com.lightboat.app.DebugLog
 import org.json.JSONObject
 import java.net.URI
 import java.util.UUID
@@ -55,6 +56,7 @@ class UserScriptHost(
     fun log(level: String, text: String) {
         if (logs.size >= 100) logs.removeFirst()
         logs.addLast("[$level] ${text.take(8000)}")
+        DebugLog.event("userscript", "$level ${text.take(1000)}")
     }
 
     fun console(message: ConsoleMessage) {
@@ -153,6 +155,9 @@ class UserScriptHost(
                     }
                     "notification" -> { Toast.makeText(activity, payload.getString("text").take(2000), Toast.LENGTH_LONG).show(); respond() }
                     "xhr" -> network.execute("$doc:$id", address, payload) { kind, result, error ->
+                        val status = result?.optInt("status", 0) ?: 0
+                        val bytes = result?.optString("responseText")?.length ?: result?.optString("base64")?.length ?: 0
+                        DebugLog.event("gm-xhr", "event=$kind status=$status bytes=$bytes url=${DebugLog.safeUrl(address)} ok=${error == null} error=${error.orEmpty().take(180)}")
                         handler.post {
                             if (alive && sessions[doc] === session) {
                                 val response = JSONObject().put("doc", doc).put("id", id).put("event", kind)
