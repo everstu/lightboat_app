@@ -11,7 +11,10 @@ class ProfileRequestInterceptor(private val userAgent: String, private val netwo
         val actual = request.requestHeaders.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value
         if (actual == userAgent || request.url.host == "127.0.0.1") return null
         return try {
-            val response = network.execute(request.url.toString(), request.method, request.requestHeaders)
+            // WebView is configured for a fresh page load. Remove validators
+            // only for this generic resource replay; native media requests use
+            // the proxy and retain their CDN cache/validation semantics.
+            val response = network.execute(request.url.toString(), request.method, request.requestHeaders, forceFresh = true)
             val mime = response.header("Content-Type").orEmpty().substringBefore(';').ifBlank { "application/octet-stream" }
             val encoding = response.body?.contentType()?.charset()?.name() ?: "UTF-8"
             val headers = response.headers.toMultimap().mapValues { it.value.joinToString(", ") }

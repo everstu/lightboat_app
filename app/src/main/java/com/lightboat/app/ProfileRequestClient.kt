@@ -18,20 +18,20 @@ class ProfileRequestClient(
     private val cookies: (String) -> String? = { null },
     private val saveCookie: (String, String) -> Unit = { _, _ -> }
 ) {
+    private object ForceFreshTag
     private val calls = ConcurrentHashMap.newKeySet<Call>()
     @Volatile private var closed = false
     private val client = base.newBuilder()
-        // The app intentionally does not use an OkHttp response cache. The
-        // connection pool is still shared by the active profile for low-latency
-        // redirects and media segments.
-        .cache(null)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .addNetworkInterceptor { chain ->
             val url = chain.request().url.toString()
+            val forceFresh = chain.request().tag(ForceFreshTag::class.java) != null
             val request = chain.request().newBuilder().header("User-Agent", userAgent)
                 .removeHeader("X-Requested-With").removeHeader("Cookie")
-                .removeHeader("If-None-Match").removeHeader("If-Modified-Since")
-                .header("Cache-Control", "no-cache")
+            if (forceFresh) {
+                request.removeHeader("If-None-Match").removeHeader("If-Modified-Since")
+                    .header("Cache-Control", "no-cache")
+            }
             cookies(url)?.let { request.header("Cookie", it) }
             val response = chain.proceed(request.build())
             response.headers("Set-Cookie").forEach { saveCookie(url, it) }
@@ -39,16 +39,16 @@ class ProfileRequestClient(
             response.newBuilder().addHeader("Vary", "User-Agent").build()
         }.build()
 
-    fun execute(url: String, method: String, headers: Map<String, String>): Response {
+    fun execute(url: String, method: String, headers: Map<String, String>, forceFresh: Boolean = false): Response {
         check(!closed) { "配置请求已结束" }
         val request = Request.Builder().url(url).method(method, null)
         headers.forEach { (name, value) ->
             if (name.lowercase() !in setOf("host", "connection", "content-length", "transfer-encoding",
-                    "accept-encoding", "cookie", "user-agent", "x-requested-with", "proxy-authorization",
-                    "if-none-match", "if-modified-since", "cache-control", "pragma")) {
+                    "accept-encoding", "cookie", "user-agent", "x-requested-with", "proxy-authorization")) {
                 request.header(name, value)
             }
         }
+        if (forceFresh) request.tag(ForceFreshTag::class.java, ForceFreshTag)
         request.header("User-Agent", userAgent)
         cookies(url)?.let { request.header("Cookie", it) }
         val call = client.newCall(request.build())

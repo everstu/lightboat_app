@@ -13,6 +13,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
+import okio.buffer
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -38,7 +39,6 @@ class MediaRequestProxyTest {
                     .header("Range", "bytes=0-10").header("If-None-Match", "old-response").build()).execute().use {
                     assertEquals(206, it.code)
                     assertEquals("bytes 0-10/100", it.header("Content-Range"))
-                    assertEquals("no-store", it.header("Cache-Control"))
                     assertEquals("video bytes", it.body!!.string())
                 }
                 repeat(3) { index ->
@@ -48,7 +48,7 @@ class MediaRequestProxyTest {
                     assertEquals("https://page.example/watch", request.getHeader("Referer"))
                     if (index > 0) {
                         assertEquals("bytes=0-10", request.getHeader("Range"))
-                        assertNull(request.getHeader("If-None-Match"))
+                        assertEquals("old-response", request.getHeader("If-None-Match"))
                     }
                 }
                 assertTrue(manifest.contains("URI=\"http://127.0.0.1:"))
@@ -121,6 +121,49 @@ class MediaRequestProxyTest {
                     assertEquals("segment-v1", it.getHeader("If-None-Match"))
                 }
             } finally { proxy.close(); network.close() }
+        }
+    }
+
+    @Test fun headProbePreservesRemoteLengthWithoutStreamingBody() {
+        MockWebServer().use { upstream ->
+            upstream.enqueue(MockResponse().setHeader("Content-Type", "video/mp4")
+                .setHeader("Content-Length", "321").setHeader("Accept-Ranges", "bytes"))
+            val network = ProfileRequestClient(ua)
+            val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
+            proxy.start()
+            try {
+                OkHttpClient().newCall(Request.Builder()
+                    .url(proxy.url(upstream.url("/video.mp4").toString(), "https://page.example/watch"))
+                    .head().build()).execute().use {
+                    assertEquals(200, it.code)
+                    assertEquals("321", it.header("Content-Length"))
+                    assertEquals("bytes", it.header("Accept-Ranges"))
+                    assertEquals(0, it.body!!.bytes().size)
+                }
+                assertEquals("HEAD", upstream.takeRequest().method)
+            } finally { proxy.close(); network.close() }
+        }
+    }
+
+    @Test fun livePlaylistYieldsHeaderWithoutWaitingForUpstreamEof() {
+        val pipe = okio.Pipe(1024)
+        val sink = pipe.sink.buffer()
+        val source = pipe.source.buffer()
+        sink.writeUtf8("#EXTM3U\nsegment.ts\n").flush()
+        val firstLine = source.readUtf8Line()!!
+        val stream = PlaylistRewriteStream(source, firstLine, { it }) {}
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            val result = executor.submit<String> {
+                val bytes = ByteArray(8)
+                val read = stream.read(bytes)
+                String(bytes, 0, read, Charsets.UTF_8)
+            }
+            assertEquals("#EXTM3U\n", result.get(1, TimeUnit.SECONDS))
+        } finally {
+            sink.close()
+            stream.close()
+            executor.shutdownNow()
         }
     }
 
