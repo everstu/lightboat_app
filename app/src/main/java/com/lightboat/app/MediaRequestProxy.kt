@@ -29,7 +29,7 @@ class MediaRequestProxy(private val network: ProfileRequestClient) : NanoHTTPD("
         })
     }
 
-    fun start() = start(SOCKET_READ_TIMEOUT, true)
+    override fun start() = start(SOCKET_READ_TIMEOUT, true)
     fun close() { stop(); workers.shutdownNow() }
 
     fun url(remote: String, referer: String): String = "$baseUrl?url=${encode(remote)}&ref=${encode(referer)}"
