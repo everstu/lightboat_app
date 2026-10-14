@@ -1,6 +1,6 @@
 # 用户脚本兼容范围
 
-轻舟内置用户脚本运行器，支持表中的油猴功能，但不是 Tampermonkey 浏览器扩展本体。每组配置仍运行一个主脚本；依赖和资源通过 WebView 自带 HTTP 缓存加载，不单独保存 JS 文件。
+轻舟内置用户脚本运行器，支持表中的油猴功能，但不是 Tampermonkey 浏览器扩展本体。每组配置仍运行一个主脚本；脚本、依赖和资源每次通过临时 WebView 的无缓存请求加载，不单独保存 JS 文件。
 
 ## 元数据与执行
 
@@ -28,7 +28,7 @@
 
 混淆或在脚本内部自行解密不影响源代码注入；但解密后使用 `eval`、`new Function` 或 WebAssembly 动态编译时，仍可能被目标网页 CSP 拦截。运行器会在脚本日志中标记脚本匹配、等待时机、正式执行以及捕获到的动态代码 CSP 错误。脚本的 `@match` 仍以实际页面域名为准，网站更换域名后必须由脚本作者更新匹配规则。
 
-不会自动检查/安装 `@updateURL`/`@downloadURL`，不会下载 `@icon`。更新由刷新时重新请求配置中的脚本 URL 及浏览器缓存规则控制。不缓存和重放已发生的 DOM/load 事件；脚本应检查 `document.readyState`。SPA 同文档路由不自动重跑脚本。
+不会自动检查/安装 `@updateURL`/`@downloadURL`，不会下载 `@icon`。刷新时重新请求配置中的脚本 URL 和依赖。不缓存和重放已发生的 DOM/load 事件；脚本应检查 `document.readyState`。SPA 同文档路由不自动重跑脚本。
 
 ## API
 
@@ -66,8 +66,8 @@ notification 目前是原生应用内文字 Toast，拒绝点击回调、图片�
 
 `GM_download`、`GM_cookie`、`GM_webRequest`、`GM_getTab`/`GM_saveTab`/`GM_getTabs`、独立标签页 `GM_openInTab`、扩展安装/自动更新、真正安全 sandbox 及系统通知并不支持。未知 grant 会写入警告；openInTab 明确抛错。不能宣称“100% 油猴兼容”。
 
-悬浮菜单 → **脚本日志** 可查看准备后的运行时机、主页面/iframe、页面地址、运行结果、错误栈/行号、浏览器错误、媒体元素错误及 GM 请求失败。最多保留当前 WebView 的 100 条日志，不上传；刷新/切换后清空。`@match` 不符合的网址和 iframe 不执行脚本。
+悬浮菜单 → **调试日志** 可查看准备后的运行时机、主页面/iframe、页面地址、运行结果、错误栈/行号、浏览器错误、媒体元素错误及 GM 请求失败。单个日志文件在进程启动时清空，刷新/切换时保留本次进程记录；不上传日志。`@match` 不符合的网址和 iframe 不执行脚本。
 
-用户贴出的 grant-none 脚本会改为默认 document-idle，避免 head/body 为空时立即报错。它本身的普通 fetch 不会转换成 GM 请求，仍可能因为服务器 CORS、站点改版、未知全局变量或脚本自身逻辑而失败。
+未指定 run-at 的用户脚本默认 document-idle，避免 head/body 为空时立即报错；显式 document-start 保留提前执行。普通 fetch/XHR 和媒体请求由 Chromium 原生处理，不改写播放源或清单，也不转换成 GM 请求；仍遵循浏览器 CORS 规则。
 
 官方参考：[Tampermonkey 文档](https://www.tampermonkey.net/documentation.php)。

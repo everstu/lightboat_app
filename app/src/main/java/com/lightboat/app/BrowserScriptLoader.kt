@@ -28,8 +28,6 @@ class BrowserScriptLoader(
     private var timeout: Runnable? = null
     private var requestSerial = 0L
     private var activeRequest = 0L
-    private var configuredView: WebView? = null
-    private var configuredPlatform: BrowserPlatform? = null
     private var systemUserAgentMetadata: UserAgentMetadata? = null
     private val fetchCode by lazy(LazyThreadSafetyMode.NONE) {
         context.assets.open("fetch-script.js").bufferedReader().use { it.readText() }
@@ -49,55 +47,43 @@ class BrowserScriptLoader(
     private fun loadInternal(url: String, userAgent: String, platform: BrowserPlatform, mode: String,
         callback: (Result<JSONObject>) -> Unit) {
         DebugLog.event("script-loader", "start mode=$mode url=${DebugLog.safeUrl(url)}")
-        cancel()
+        // Like v1.0.0, each download gets its own short-lived WebView.
+        close()
         val parsed = URI(url)
         val origin = URI(parsed.scheme.lowercase(), null, parsed.host.lowercase(), parsed.port, null, null, null).toString()
-        val loader = view ?: WebView(context).also {
+        val loader = WebView(context).also {
             view = it
             it.alpha = 0f
             it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             container.addView(it, ViewGroup.LayoutParams(1, 1))
         }
-        loader.stopLoading()
-        runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
-        if (configuredView !== loader) {
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
-                systemUserAgentMetadata = WebSettingsCompat.getUserAgentMetadata(loader.settings)
-            }
-            loader.settings.apply {
-                userAgentString = userAgent
-                javaScriptEnabled = true
-                // A launch must observe the current script contents. Cookies and
-                // other Chromium storage remain available, but HTTP body cache
-                // entries are bypassed for this request.
-                cacheMode = WebSettings.LOAD_NO_CACHE
-                allowFileAccess = false
-                allowContentAccess = false
-                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                blockNetworkImage = true
-            }
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
-                @Suppress("DEPRECATION")
-                WebSettingsCompat.setRequestedWithHeaderOriginAllowList(loader.settings, emptySet())
-            }
-            applyUserAgentMetadata(loader, userAgent, platform)
-            configuredView = loader
-            configuredPlatform = platform
-        } else if (loader.settings.userAgentString != userAgent || configuredPlatform != platform) {
-            if (loader.settings.userAgentString != userAgent) loader.settings.userAgentString = userAgent
-            applyUserAgentMetadata(loader, userAgent, platform)
-            configuredPlatform = platform
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+            systemUserAgentMetadata = WebSettingsCompat.getUserAgentMetadata(loader.settings)
         }
+        loader.settings.apply {
+            userAgentString = userAgent
+            javaScriptEnabled = true
+            // Downloaded scripts must be fresh even though browsing uses
+            // Chromium's normal cache policy.
+            cacheMode = WebSettings.LOAD_NO_CACHE
+            allowFileAccess = false
+            allowContentAccess = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            blockNetworkImage = true
+        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+            @Suppress("DEPRECATION")
+            WebSettingsCompat.setRequestedWithHeaderOriginAllowList(loader.settings, emptySet())
+        }
+        applyUserAgentMetadata(loader, userAgent, platform)
         val request = ++requestSerial
         activeRequest = request
         fun finish(result: Result<JSONObject>) {
             if (view !== loader || activeRequest != request) return
             DebugLog.event("script-loader", "finish mode=$mode ok=${result.isSuccess} url=${DebugLog.safeUrl(url)} error=${result.exceptionOrNull()?.message.orEmpty().take(180)}")
-            activeRequest = 0L
-            timeout?.let { handler.removeCallbacks(it) }
-            timeout = null
-            runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
-            if (result.isFailure) loader.stopLoading()
+            // Dispose this request before callbacks can start a new dependency
+            // download. Otherwise renderer-exit cleanup can cancel the new view.
+            close()
             callback(result)
         }
         loader.webViewClient = object : WebViewClient() {
@@ -108,7 +94,6 @@ class BrowserScriptLoader(
             }
             override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
                 finish(Result.failure(IllegalStateException("脚本准备进程已退出，请重试")))
-                close()
                 return true
             }
         }
@@ -141,7 +126,7 @@ class BrowserScriptLoader(
         activeRequest = 0L
         if (hadActiveRequest) view?.let { loader ->
             runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
-            loader.stopLoading()
+            runCatching { loader.stopLoading() }
         }
     }
 
@@ -149,18 +134,14 @@ class BrowserScriptLoader(
         cancel()
         view?.let { loader ->
             view = null
-            configuredView = null
-            configuredPlatform = null
             systemUserAgentMetadata = null
             runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
             runCatching { container.removeView(loader) }
             runCatching { loader.stopLoading() }
-            runCatching { loader.onPause() }
-            runCatching { loader.webViewClient = WebViewClient() }
-            container.post {
-                runCatching { loader.destroy() }.onFailure {
-                    DebugLog.event("script-loader", "destroy failed ${it.message.orEmpty().take(200)}")
-                }
+            // Keep the renderer-exit handler until destroy completes. A default
+            // WebViewClient would treat a late renderer exit as unhandled.
+            runCatching { loader.destroy() }.onFailure {
+                DebugLog.event("script-loader", "destroy failed ${it.message.orEmpty().take(200)}")
             }
         }
     }

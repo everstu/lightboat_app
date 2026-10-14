@@ -11,11 +11,4 @@ class DebugLogTest {
         )
     }
 
-    @Test fun headerSummaryNeverIncludesHeaderValues() {
-        assertEquals("range,authorization,cookie", DebugLog.headersPresent(mapOf(
-            "Range" to "bytes=0-10",
-            "Authorization" to "Bearer secret",
-            "Cookie" to "sid=secret",
-        )))
-    }
 }

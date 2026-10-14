@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -43,8 +42,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.ScriptHandler
 import androidx.webkit.UserAgentMetadata
-import androidx.webkit.ServiceWorkerClientCompat
-import androidx.webkit.ServiceWorkerControllerCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -59,7 +56,6 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import java.util.UUID
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 import com.lightboat.app.userscript.ScriptBundle
 import com.lightboat.app.userscript.ScriptPreparer
@@ -73,21 +69,6 @@ class MainActivity : AppCompatActivity() {
     private var webView: AppWebView? = null
     private var configuredWebView: AppWebView? = null
     private var systemUserAgentMetadata: UserAgentMetadata? = null
-    private var mediaProxy: MediaRequestProxy? = null
-    private var profileNetwork: ProfileRequestClient? = null
-    @Volatile private var requestInterceptor: ProfileRequestInterceptor? = null
-    /** One transport per profile session: reuse connections during playback, reset on refresh/switch. */
-    private fun createProfileTransport(): okhttp3.OkHttpClient {
-        val dispatcher = okhttp3.Dispatcher().apply {
-            maxRequests = 32
-            maxRequestsPerHost = 8
-        }
-        return okhttp3.OkHttpClient.Builder()
-            .dispatcher(dispatcher)
-            .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
-            .retryOnConnectionFailure(true)
-            .build()
-    }
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
     private var generation = 0
@@ -113,7 +94,6 @@ class MainActivity : AppCompatActivity() {
     private val nativeGuardScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("native-guard.js") }
     private val clipboardSupportScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("clipboard-support.js") }
     private val mediaDiagnosticsScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("media-diagnostics.js") }
-    private val mediaRoutingScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("media-request-routing.js") }
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
     private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
@@ -185,13 +165,6 @@ class MainActivity : AppCompatActivity() {
         windowsUserAgent = MobileUserAgent.windowsChrome(defaultUserAgent)
         store = ConfigStore(this, defaultUserAgent)
         scriptLoader = BrowserScriptLoader(this, binding.webContainer)
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE) &&
-            WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)) {
-            ServiceWorkerControllerCompat.getInstance().setServiceWorkerClient(object : ServiceWorkerClientCompat() {
-                override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? =
-                    requestInterceptor?.intercept(request)
-            })
-        }
         binding.edgeMenuButton.setOnClickListener { showBrowserMenu() }
         binding.scanWebsiteButton.setOnClickListener { startScan(ScanTarget.WEBSITE) }
         binding.scanScriptButton.setOnClickListener { startScan(ScanTarget.SCRIPT) }
@@ -633,8 +606,7 @@ class MainActivity : AppCompatActivity() {
                                     prepared.fold(onSuccess = { bundle ->
                                         DebugLog.event("script", "prepared name=${bundle.metadata.name.take(100)} runAt=${bundle.metadata.runAt} grants=${bundle.metadata.grants.size} sourceBytes=${bundle.source.length}")
                                         scriptLoader.close()
-                                        // Let Chromium finish destroying the short-lived loader
-                                        // before allocating the browsing WebView renderer.
+                                        // Start navigation after the completed loader callback.
                                         binding.root.post {
                                             if (!isDestroyed && request == generation && navigationRequest == navigationGeneration) {
                                                 try {
@@ -682,15 +654,7 @@ class MainActivity : AppCompatActivity() {
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
         fun isCurrentNavigation() = view === webView && navigationRequest == navigationGeneration
-        val cookies = CookieManager.getInstance()
-        val network = ProfileRequestClient(profile.userAgent, createProfileTransport(),
-            cookies = { cookies.getCookie(it) }, saveCookie = { url, cookie -> cookies.setCookie(url, cookie) })
-        profileNetwork = network
-        val interceptor = ProfileRequestInterceptor(profile.userAgent, network)
-        requestInterceptor = interceptor
-        val proxy = MediaRequestProxy(network)
-        mediaProxy = proxy
-        proxy.start()
+        DebugLog.event("network", "Chromium native transport; cache=default mediaProxy=false requestReplay=false")
         view.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                 if (isCurrentNavigation()) userScriptHost?.console(message)
@@ -721,12 +685,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
         view.webViewClient = object : WebViewClient() {
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                interceptor.intercept(request).also {
-                    if (DebugLog.shouldTraceUrl(request.url.toString())) {
-                        DebugLog.event("web-request", "${request.method} ${DebugLog.safeUrl(request.url.toString())} ua=${request.requestHeaders.keys.any { it.equals("User-Agent", true) }} intercepted=${it != null}")
-                    }
+            // Observe requests without replacing Chromium's response or transport.
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (DebugLog.shouldTraceUrl(request.url.toString())) {
+                    DebugLog.event("web-request", "${request.method} ${DebugLog.safeUrl(request.url.toString())} native=true")
                 }
+                return null
+            }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!isCurrentNavigation()) return true
@@ -808,8 +773,6 @@ class MainActivity : AppCompatActivity() {
         }
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, guard, setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupportScript, setOf("*"))
-        scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view,
-            mediaRoutingScript.replace("__LIGHTBOAT_MEDIA_PROXY__", JSONObject.quote(proxy.baseUrl)), setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, mediaDiagnosticsScript, setOf("*"))
         MobileUserAgent.navigatorIdentityScript(profile.platform, profile.userAgent)?.let { identity ->
             scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, identity, setOf("*"))
@@ -818,7 +781,7 @@ class MainActivity : AppCompatActivity() {
         scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
         view.onResume()
-        // Chromium requests use this identity; native media uses the session proxy.
+        // Configure browser identity before navigation; media stays on the native path.
         applyProfileUserAgent(view, profile)
         view.loadUrl(profile.url)
     }
@@ -836,7 +799,7 @@ class MainActivity : AppCompatActivity() {
             view.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
-                cacheMode = WebSettings.LOAD_NO_CACHE
+                cacheMode = WebSettings.LOAD_DEFAULT
                 useWideViewPort = true
                 loadWithOverviewMode = true
                 builtInZoomControls = false
@@ -846,15 +809,9 @@ class MainActivity : AppCompatActivity() {
                 javaScriptCanOpenWindowsAutomatically = false
                 allowFileAccess = false
                 allowContentAccess = false
-                // Legacy HLS manifests may still reference HTTP media segments from an HTTPS page.
-                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                // The site controls its playlist; don't require another tap for every next item.
-                mediaPlaybackRequiresUserGesture = false
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Keep the active renderer responsive while allowing the system
-                // to reclaim it when the activity is no longer visible.
-                view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true)
+                // Use the v1.0.0 media policy instead of overriding playback behavior.
+                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                mediaPlaybackRequiresUserGesture = true
             }
             CookieManager.getInstance().apply {
                 setAcceptCookie(true)
@@ -1001,33 +958,15 @@ class MainActivity : AppCompatActivity() {
             runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatGM") }
             runCatching { binding.webContainer.removeView(view) }
             runCatching { view.stopLoading() }
-            runCatching { view.onPause() }
             runCatching { view.webChromeClient = null }
-            runCatching { view.webViewClient = WebViewClient() }
-            binding.root.post {
-                runCatching { view.destroy() }.onFailure {
-                    DebugLog.event("webview", "destroy failed ${it.message.orEmpty().take(200)}")
-                }
+            // Keep onRenderProcessGone installed during teardown, and finish
+            // destruction before a replacement WebView can start loading.
+            runCatching { view.destroy() }.onFailure {
+                DebugLog.event("webview", "destroy failed ${it.message.orEmpty().take(200)}")
             }
         }
-        closeProfileNetwork()
         pageReady = false
         pageFailed = false
-    }
-
-    private fun closeProfileNetwork() {
-        DebugLog.event("network", "close mediaProxy=${mediaProxy != null} profileNetwork=${profileNetwork != null}")
-        requestInterceptor = null
-        val retiringProxy = mediaProxy
-        val retiringNetwork = profileNetwork
-        mediaProxy = null
-        profileNetwork = null
-        runCatching { retiringProxy?.close() }.onFailure {
-            DebugLog.event("network", "media proxy close failed ${it.message.orEmpty().take(200)}")
-        }
-        runCatching { retiringNetwork?.close() }.onFailure {
-            DebugLog.event("network", "profile network close failed ${it.message.orEmpty().take(200)}")
-        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -1052,7 +991,6 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onStart() {
         super.onStart()
-        webView?.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, true)
         webView?.onResume()
     }
     override fun onResume() { super.onResume(); updateChrome() }
@@ -1060,15 +998,6 @@ class MainActivity : AppCompatActivity() {
         webView?.onPause()
         CookieManager.getInstance().flush()
         super.onStop()
-    }
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
-            // The activity is no longer visible. Let Chromium waive renderer
-            // priority so the system can reclaim renderer memory; onStart()
-            // restores foreground priority without clearing page storage.
-            webView?.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_WAIVED, true)
-        }
     }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)

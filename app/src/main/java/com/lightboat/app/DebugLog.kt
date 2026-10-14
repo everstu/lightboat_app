@@ -90,10 +90,6 @@ object DebugLog {
         return "$scheme://$host$port$path$query"
     }
 
-    fun headersPresent(headers: Map<String, String>): String = listOf(
-        "range", "if-range", "if-none-match", "if-modified-since", "authorization", "origin", "referer", "cookie"
-    ).filter { key -> headers.keys.any { it.equals(key, true) } }.joinToString(",").ifBlank { "none" }
-
     fun shouldTraceUrl(value: String?): Boolean {
         val uri = runCatching { URI(value.orEmpty()) }.getOrNull() ?: return false
         val path = uri.path.orEmpty().lowercase()
@@ -108,16 +104,5 @@ object DebugLog {
             path.endsWith(".m4s") || path.endsWith(".ts") ||
             path.endsWith(".mp3") || path.endsWith(".m4a") || path.endsWith(".aac") || path.endsWith(".key") ||
             path.endsWith(".webm") || path.endsWith(".ogg") || path.endsWith(".ogv")
-    }
-
-    fun isMediaRequest(value: String?, headers: Map<String, String>): Boolean {
-        if (isMediaUrl(value)) return true
-        fun header(name: String) = headers.entries.firstOrNull { it.key.equals(name, true) }?.value.orEmpty().lowercase()
-        val accept = header("Accept")
-        val destination = header("Sec-Fetch-Dest")
-        return headers.keys.any { it.equals("Range", true) } || destination in setOf("audio", "video", "track") ||
-            accept.contains("video/") || accept.contains("audio/") ||
-            accept.contains("application/vnd.apple.mpegurl") || accept.contains("application/x-mpegurl") ||
-            accept.contains("application/dash+xml")
     }
 }
