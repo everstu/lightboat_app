@@ -1,9 +1,18 @@
 package com.lightboat.app
 
+import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -85,5 +94,87 @@ class MediaRequestProxyTest {
             OkHttpClient().newCall(Request.Builder().url(proxy.url("http://127.0.0.2:1234/private", "https://page.example/"))
                 .build()).execute().use { assertEquals(400, it.code) }
         } finally { proxy.close(); network.close() }
+    }
+
+    @Test fun mediaProxyPreservesAuthorizationValidatorsAndSegmentCachePolicy() {
+        MockWebServer().use { upstream ->
+            upstream.enqueue(MockResponse().setBody("video bytes")
+                .setHeader("Content-Type", "video/mp4")
+                .setHeader("ETag", "segment-v1")
+                .setHeader("Cache-Control", "private, max-age=60"))
+            val network = ProfileRequestClient(ua)
+            val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
+            proxy.start()
+            try {
+                OkHttpClient().newCall(Request.Builder()
+                    .url(proxy.url(upstream.url("/video.mp4").toString(), "https://page.example/watch"))
+                    .header("Authorization", "Bearer media-token")
+                    .header("If-None-Match", "segment-v1")
+                    .build()).execute().use {
+                    assertEquals(200, it.code)
+                    assertEquals("segment-v1", it.header("ETag"))
+                    assertEquals("private, max-age=60", it.header("Cache-Control"))
+                    assertEquals("video bytes", it.body!!.string())
+                }
+                upstream.takeRequest().also {
+                    assertEquals("Bearer media-token", it.getHeader("Authorization"))
+                    assertEquals("segment-v1", it.getHeader("If-None-Match"))
+                }
+            } finally { proxy.close(); network.close() }
+        }
+    }
+
+    @Test fun playlistRequestIsNotStarvedBySixOpenMediaConnections() {
+        MockWebServer().use { upstream ->
+            val holdsSeen = CountDownLatch(6)
+            upstream.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    if (request.path?.startsWith("/hold") == true) {
+                        holdsSeen.countDown()
+                        MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+                    } else {
+                        MockResponse().setBody("#EXTM3U\n#EXTINF:5,\nsegment.ts\n")
+                            .setHeader("Content-Type", "application/vnd.apple.mpegurl")
+                    }
+            }
+            val upstreamDispatcher = okhttp3.Dispatcher().apply {
+                maxRequests = 32
+                maxRequestsPerHost = 16
+            }
+            val network = ProfileRequestClient(ua, OkHttpClient.Builder().dispatcher(upstreamDispatcher).build())
+            val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
+            proxy.start()
+            val browserDispatcher = okhttp3.Dispatcher().apply {
+                maxRequests = 32
+                maxRequestsPerHost = 16
+            }
+            val browser = OkHttpClient.Builder().dispatcher(browserDispatcher)
+                .callTimeout(2, TimeUnit.SECONDS).build()
+            val heldCalls = mutableListOf<Call>()
+            try {
+                repeat(6) { index ->
+                    browser.newCall(Request.Builder()
+                        .url(proxy.url(upstream.url("/hold-$index").toString(), "https://page.example/watch"))
+                        .build()).also { call ->
+                        heldCalls += call
+                        call.enqueue(object : Callback {
+                            override fun onFailure(call: Call, error: IOException) = Unit
+                            override fun onResponse(call: Call, response: Response) { response.close() }
+                        })
+                    }
+                }
+                assertTrue("six media connections did not reach upstream", holdsSeen.await(2, TimeUnit.SECONDS))
+                browser.newCall(Request.Builder()
+                    .url(proxy.url(upstream.url("/next.m3u8").toString(), "https://page.example/watch"))
+                    .build()).execute().use {
+                    assertEquals(200, it.code)
+                    assertTrue(it.body!!.string().startsWith("#EXTM3U"))
+                }
+            } finally {
+                heldCalls.forEach { it.cancel() }
+                proxy.close()
+                network.close()
+            }
+        }
     }
 }
