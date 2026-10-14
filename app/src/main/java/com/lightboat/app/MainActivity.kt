@@ -68,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     private var config = AppConfig.EMPTY
     private var webView: AppWebView? = null
     private var configuredWebView: AppWebView? = null
+    private var configuredPlatform: BrowserPlatform? = null
     private var systemUserAgentMetadata: UserAgentMetadata? = null
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
@@ -83,7 +84,9 @@ class MainActivity : AppCompatActivity() {
     private var scanTarget: ScanTarget? = null
     private var nativeDialog: Dialog? = null
     private lateinit var defaultUserAgent: String
+    private lateinit var appleUserAgent: String
     private lateinit var windowsUserAgent: String
+    private var editingPlatform = BrowserPlatform.ANDROID
     private lateinit var fullscreenPlayer: FullscreenPlayer
     private var userScriptHost: UserScriptHost? = null
     private lateinit var profileAdapter: ProfileAdapter
@@ -158,26 +161,23 @@ class MainActivity : AppCompatActivity() {
             insets
         }
         defaultUserAgent = MobileUserAgent.default(this)
+        appleUserAgent = MobileUserAgent.appleSafari()
         windowsUserAgent = MobileUserAgent.windowsChrome(defaultUserAgent)
         store = ConfigStore(this, defaultUserAgent)
         scriptLoader = BrowserScriptLoader(this, binding.webContainer)
         binding.edgeMenuButton.setOnClickListener { showBrowserMenu() }
         binding.scanWebsiteButton.setOnClickListener { startScan(ScanTarget.WEBSITE) }
         binding.scanScriptButton.setOnClickListener { startScan(ScanTarget.SCRIPT) }
-        binding.resetUserAgentButton.setOnClickListener {
-            binding.userAgentInput.setText(defaultUserAgent)
-            binding.userAgentInput.error = null
-        }
-        binding.windowsUserAgentButton.setOnClickListener {
-            binding.userAgentInput.setText(windowsUserAgent)
-            binding.userAgentInput.error = null
-        }
+        binding.applePlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.APPLE, true) }
+        binding.androidPlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.ANDROID, true) }
+        binding.windowsPlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.WINDOWS, true) }
         binding.settingsButton.setOnClickListener { showProfiles() }
         binding.editButton.setOnClickListener { showProfiles() }
         binding.refreshButton.setOnClickListener { currentProfile()?.let { openProfile(it) } }
         binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchLast() }
         binding.addButton.setOnClickListener { showEditor(null) }
-        binding.saveButton.setOnClickListener { saveEditor() }
+        binding.saveButton.setOnClickListener { saveEditor(false) }
+        binding.saveOpenButton.setOnClickListener { saveEditor(true) }
         binding.cancelButton.setOnClickListener { showProfiles() }
         binding.returnButton.setOnClickListener { returnToPage() }
         binding.importButton.setOnClickListener { importFile.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }
@@ -212,6 +212,9 @@ class MainActivity : AppCompatActivity() {
             binding.websiteInput.setText(savedInstanceState.getString("draftUrl"))
             binding.scriptInput.setText(savedInstanceState.getString("draftScript"))
             binding.userAgentInput.setText(savedInstanceState.getString("draftUserAgent", defaultUserAgent))
+            savedInstanceState.getString("draftPlatform")?.let {
+                selectPlatform(BrowserPlatform.parse(it), false)
+            }
         } else if (savedInstanceState?.getBoolean("manager") == true) showProfiles() else launchLast()
     }
 
@@ -499,16 +502,38 @@ class MainActivity : AppCompatActivity() {
         binding.websiteInput.setText(profile?.url.orEmpty())
         binding.scriptInput.setText(profile?.scriptUrl.orEmpty())
         binding.userAgentInput.setText(profile?.userAgent ?: defaultUserAgent)
+        selectPlatform(profile?.platform ?: BrowserPlatform.ANDROID, false)
         binding.nameInput.error = null
         binding.websiteInput.error = null
         binding.scriptInput.error = null
         binding.userAgentInput.error = null
         binding.saveButton.setText(R.string.save_profile)
+        binding.saveOpenButton.setText(R.string.save_open)
         binding.cancelButton.setText(R.string.back_profiles)
         binding.cancelButton.visibility = View.VISIBLE
     }
 
-    private fun saveEditor() {
+    private fun selectPlatform(platform: BrowserPlatform, updateUserAgent: Boolean) {
+        editingPlatform = platform
+        if (updateUserAgent) {
+            binding.userAgentInput.setText(when (platform) {
+                BrowserPlatform.APPLE -> appleUserAgent
+                BrowserPlatform.ANDROID -> defaultUserAgent
+                BrowserPlatform.WINDOWS -> windowsUserAgent
+            })
+            binding.userAgentInput.error = null
+        }
+        listOf(
+            BrowserPlatform.APPLE to binding.applePlatformButton,
+            BrowserPlatform.ANDROID to binding.androidPlatformButton,
+            BrowserPlatform.WINDOWS to binding.windowsPlatformButton,
+        ).forEach { (item, button) ->
+            button.isSelected = item == platform
+            button.alpha = if (item == platform) 1f else 0.55f
+        }
+    }
+
+    private fun saveEditor(openAfterSave: Boolean) {
         val name = binding.nameInput.text.toString().trim()
         if (name.isBlank()) { binding.nameInput.error = "请填写配置名称"; return }
         val url = try { AppConfig.normalizeUrl(binding.websiteInput.text.toString()) } catch (error: IllegalArgumentException) {
@@ -520,11 +545,16 @@ class MainActivity : AppCompatActivity() {
         val userAgent = try { AppConfig.normalizeUserAgent(binding.userAgentInput.text.toString()) } catch (error: IllegalArgumentException) {
             binding.userAgentInput.error = error.message; return
         }
-        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent)
-        val next = try { config.upsert(profile).select(profile.id) } catch (error: Exception) {
+        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent, editingPlatform)
+        val next = try {
+            config.upsert(profile).let { if (openAfterSave) it.select(profile.id) else it }
+        } catch (error: Exception) {
             toast(error.message.orEmpty()); return
         }
-        if (persist(next)) { hideKeyboard(); openProfile(profile) }
+        if (persist(next)) {
+            hideKeyboard()
+            if (openAfterSave) openProfile(profile) else showProfiles()
+        }
     }
 
     private fun persist(next: AppConfig): Boolean = try {
@@ -541,7 +571,7 @@ class MainActivity : AppCompatActivity() {
         val navigationRequest = ++navigationGeneration
         hideKeyboard()
         cancelDownload()
-        prepareWebViewForProfile(profile)
+        prepareWebViewForProfile()
         currentId = profile.id
         showLoading(R.string.preparing)
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) ||
@@ -549,14 +579,16 @@ class MainActivity : AppCompatActivity() {
             showError(R.string.unsupported_title, getString(R.string.unsupported_message))
             return
         }
-        prepareMainWebView(profile.userAgent)
+        prepareMainWebView(profile)
         val request = generation
         try {
-            scriptLoader.load(profile.scriptUrl, profile.userAgent) { result ->
+            scriptLoader.load(profile.scriptUrl, profile.userAgent, profile.platform) { result ->
                 if (!isDestroyed && request == generation) {
                     result.fold(onSuccess = { script ->
                         try {
-                            ScriptPreparer(scriptLoader).prepare(script, profile.scriptUrl, profile.userAgent) { prepared ->
+                            ScriptPreparer(scriptLoader).prepare(
+                                script, profile.scriptUrl, profile.userAgent, profile.platform
+                            ) { prepared ->
                                 if (!isDestroyed && request == generation) {
                                     prepared.fold(onSuccess = { bundle ->
                                         scriptLoader.close()
@@ -704,6 +736,9 @@ class MainActivity : AppCompatActivity() {
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, guard, setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupportScript, setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, mediaDiagnosticsScript, setOf("*"))
+        MobileUserAgent.navigatorIdentityScript(profile.platform, profile.userAgent)?.let { identity ->
+            scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, identity, setOf("*"))
+        }
         userScriptHost = UserScriptHost(this, view, profile, bundle)
         scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
@@ -712,7 +747,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun prepareMainWebView(userAgent: String) {
+    private fun prepareMainWebView(profile: Profile) {
+        val userAgent = profile.userAgent
         val view = webView ?: AppWebView(this).also {
             webView = it
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
@@ -750,21 +786,19 @@ class MainActivity : AppCompatActivity() {
                 @Suppress("DEPRECATION")
                 WebSettingsCompat.setRequestedWithHeaderOriginAllowList(view.settings, emptySet())
             }
-            applyUserAgentMetadata(view, userAgent)
+            applyUserAgentMetadata(view, profile)
             configuredWebView = view
-        } else if (view.settings.userAgentString != userAgent) {
-            view.settings.userAgentString = userAgent
-            applyUserAgentMetadata(view, userAgent)
+            configuredPlatform = profile.platform
+        } else if (view.settings.userAgentString != userAgent || configuredPlatform != profile.platform) {
+            if (view.settings.userAgentString != userAgent) view.settings.userAgentString = userAgent
+            applyUserAgentMetadata(view, profile)
+            configuredPlatform = profile.platform
         }
     }
 
-    private fun applyUserAgentMetadata(view: AppWebView, userAgent: String) {
+    private fun applyUserAgentMetadata(view: AppWebView, profile: Profile) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return
-        val metadata = if (MobileUserAgent.isWindowsChrome(userAgent)) {
-            MobileUserAgent.windowsMetadata(userAgent)
-        } else {
-            systemUserAgentMetadata
-        }
+        val metadata = MobileUserAgent.metadata(profile.platform, profile.userAgent, systemUserAgentMetadata)
         if (metadata != null) WebSettingsCompat.setUserAgentMetadata(view.settings, metadata)
     }
 
@@ -776,7 +810,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun readAssetText(name: String) = assets.open(name).bufferedReader().use { it.readText() }
 
-    private fun prepareWebViewForProfile(profile: Profile) {
+    private fun prepareWebViewForProfile() {
         fullscreenPlayer.hide()
         userScriptHost?.close()
         userScriptHost = null
@@ -901,6 +935,7 @@ class MainActivity : AppCompatActivity() {
         }
         webView = null
         configuredWebView = null
+        configuredPlatform = null
         pageReady = false
         pageFailed = false
         resetHistoryOnCommit = false
@@ -917,6 +952,7 @@ class MainActivity : AppCompatActivity() {
         outState.putString("draftUrl", binding.websiteInput.text.toString())
         outState.putString("draftScript", binding.scriptInput.text.toString())
         outState.putString("draftUserAgent", binding.userAgentInput.text.toString())
+        outState.putString("draftPlatform", editingPlatform.configValue)
         outState.putString("scanTarget", scanTarget?.name)
         outState.putBoolean("menuLeft", binding.edgeMenuButton.leftEdge)
         outState.putFloat("menuHeight", binding.edgeMenuButton.heightFraction)

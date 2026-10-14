@@ -11,7 +11,10 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 import java.net.URI
 
@@ -26,21 +29,25 @@ class BrowserScriptLoader(
     private var requestSerial = 0L
     private var activeRequest = 0L
     private var configuredView: WebView? = null
+    private var configuredPlatform: BrowserPlatform? = null
+    private var systemUserAgentMetadata: UserAgentMetadata? = null
     private val fetchCode by lazy(LazyThreadSafetyMode.NONE) {
         context.assets.open("fetch-script.js").bufferedReader().use { it.readText() }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    fun load(url: String, userAgent: String, callback: (Result<String>) -> Unit) {
-        loadInternal(url, userAgent, "script") { result -> callback(result.map { it.getString("script") }) }
+    fun load(url: String, userAgent: String, platform: BrowserPlatform, callback: (Result<String>) -> Unit) {
+        loadInternal(url, userAgent, platform, "script") { result -> callback(result.map { it.getString("script") }) }
     }
 
-    fun loadAsset(url: String, userAgent: String, resource: Boolean, callback: (Result<JSONObject>) -> Unit) {
-        loadInternal(url, userAgent, if (resource) "resource" else "require", callback)
+    fun loadAsset(url: String, userAgent: String, platform: BrowserPlatform, resource: Boolean,
+        callback: (Result<JSONObject>) -> Unit) {
+        loadInternal(url, userAgent, platform, if (resource) "resource" else "require", callback)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun loadInternal(url: String, userAgent: String, mode: String, callback: (Result<JSONObject>) -> Unit) {
+    private fun loadInternal(url: String, userAgent: String, platform: BrowserPlatform, mode: String,
+        callback: (Result<JSONObject>) -> Unit) {
         cancel()
         val parsed = URI(url)
         val origin = URI(parsed.scheme.lowercase(), null, parsed.host.lowercase(), parsed.port, null, null, null).toString()
@@ -53,6 +60,9 @@ class BrowserScriptLoader(
         loader.stopLoading()
         runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
         if (configuredView !== loader) {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+                systemUserAgentMetadata = WebSettingsCompat.getUserAgentMetadata(loader.settings)
+            }
             loader.settings.apply {
                 userAgentString = userAgent
                 javaScriptEnabled = true
@@ -62,9 +72,17 @@ class BrowserScriptLoader(
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 blockNetworkImage = true
             }
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+                @Suppress("DEPRECATION")
+                WebSettingsCompat.setRequestedWithHeaderOriginAllowList(loader.settings, emptySet())
+            }
+            applyUserAgentMetadata(loader, userAgent, platform)
             configuredView = loader
-        } else if (loader.settings.userAgentString != userAgent) {
-            loader.settings.userAgentString = userAgent
+            configuredPlatform = platform
+        } else if (loader.settings.userAgentString != userAgent || configuredPlatform != platform) {
+            if (loader.settings.userAgentString != userAgent) loader.settings.userAgentString = userAgent
+            applyUserAgentMetadata(loader, userAgent, platform)
+            configuredPlatform = platform
         }
         val request = ++requestSerial
         activeRequest = request
@@ -123,11 +141,19 @@ class BrowserScriptLoader(
         view?.let { loader ->
             view = null
             configuredView = null
+            configuredPlatform = null
+            systemUserAgentMetadata = null
             runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
             container.removeView(loader)
             loader.stopLoading()
             loader.webViewClient = WebViewClient()
             loader.destroy()
         }
+    }
+
+    private fun applyUserAgentMetadata(loader: WebView, userAgent: String, platform: BrowserPlatform) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return
+        val metadata = MobileUserAgent.metadata(platform, userAgent, systemUserAgentMetadata)
+        if (metadata != null) WebSettingsCompat.setUserAgentMetadata(loader.settings, metadata)
     }
 }

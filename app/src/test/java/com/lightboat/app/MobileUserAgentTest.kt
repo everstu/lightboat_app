@@ -1,6 +1,7 @@
 package com.lightboat.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MobileUserAgentTest {
@@ -21,5 +22,23 @@ class MobileUserAgentTest {
         assertEquals(64, metadata.bitness)
         assertEquals(false, metadata.isMobile)
         assertEquals("140.0.7339.51", metadata.fullVersion)
+        assertEquals(BrowserPlatform.WINDOWS, MobileUserAgent.detect(MobileUserAgent.windowsChrome(android)))
+    }
+
+    @Test
+    fun applePresetRemovesAndroidIdentityValues() {
+        val userAgent = MobileUserAgent.appleSafari()
+        val metadata = MobileUserAgent.appleMetadata()
+
+        assertEquals(BrowserPlatform.APPLE, MobileUserAgent.detect(userAgent))
+        assertEquals("iOS", metadata.platform)
+        assertEquals("iPhone", metadata.model)
+        assertEquals(true, metadata.isMobile)
+        val script = MobileUserAgent.navigatorIdentityScript(BrowserPlatform.APPLE, userAgent).orEmpty()
+        assertTrue(script.contains("platform:'iPhone'"))
+        assertTrue(script.contains("vendor:'Apple Computer, Inc.'"))
+        assertTrue(script.contains("'userAgentData'"))
+        assertTrue(script.contains("get: () => undefined"))
+        assertEquals(null, MobileUserAgent.navigatorIdentityScript(BrowserPlatform.ANDROID, userAgent))
     }
 }

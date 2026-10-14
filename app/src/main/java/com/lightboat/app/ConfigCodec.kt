@@ -15,9 +15,13 @@ object ConfigCodec {
             val name = item.getString("name").trim()
             require(id.isNotBlank() && id.length <= 100) { "配置 ID 无效" }
             require(name.isNotBlank() && name.length <= 60) { "配置名称须为 1–60 个字符" }
+            val userAgent = AppConfig.normalizeUserAgent(
+                if (item.has("userAgent")) item.getString("userAgent") else defaultUserAgent
+            )
+            val platform = if (item.has("platform")) BrowserPlatform.parse(item.getString("platform"))
+                else MobileUserAgent.detect(userAgent)
             Profile(id, name, AppConfig.normalizeUrl(item.getString("url")),
-                AppConfig.normalizeUrl(item.getString("scriptUrl")),
-                AppConfig.normalizeUserAgent(if (item.has("userAgent")) item.getString("userAgent") else defaultUserAgent))
+                AppConfig.normalizeUrl(item.getString("scriptUrl")), userAgent, platform)
         }
         require(profiles.map { it.id }.distinct().size == profiles.size) { "配置 ID 不能重复" }
         require(root.has("lastProfileId")) { "缺少 lastProfileId" }
@@ -39,6 +43,7 @@ object ConfigCodec {
                     put("url", profile.url)
                     put("scriptUrl", profile.scriptUrl)
                     put("userAgent", profile.userAgent)
+                    put("platform", profile.platform.configValue)
                 })
             }
         })

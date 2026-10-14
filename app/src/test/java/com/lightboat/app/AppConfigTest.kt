@@ -44,9 +44,17 @@ class AppConfigTest {
     }
 
     @Test fun customUserAgentRoundTripsWithoutChangingSelection() {
-        val profile = first.copy(userAgent = "Custom Android Mobile/1.0")
+        val profile = first.copy(userAgent = "Custom Android Mobile/1.0", platform = BrowserPlatform.ANDROID)
         val config = AppConfig.EMPTY.upsert(profile)
         assertEquals(profile, ConfigCodec.decode(ConfigCodec.encode(config)).lastProfile)
+    }
+
+    @Test fun platformPresetRoundTripsAndLegacyConfigInfersItFromUserAgent() {
+        val apple = first.copy(userAgent = MobileUserAgent.appleSafari(), platform = BrowserPlatform.APPLE)
+        assertEquals(BrowserPlatform.APPLE,
+            ConfigCodec.decode(ConfigCodec.encode(AppConfig.EMPTY.upsert(apple))).lastProfile?.platform)
+        val legacy = """{"version":1,"lastProfileId":"w","profiles":[{"id":"w","name":"Windows","url":"https://example.com","scriptUrl":"https://example.com/a.js","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140.0.0.0"}]}"""
+        assertEquals(BrowserPlatform.WINDOWS, ConfigCodec.decode(legacy).lastProfile?.platform)
     }
 
     @Test fun oldConfigUsesProvidedDefaultUserAgent() {

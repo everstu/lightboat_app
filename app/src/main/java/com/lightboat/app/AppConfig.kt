@@ -7,7 +7,8 @@ data class Profile(
     val name: String,
     val url: String,
     val scriptUrl: String,
-    val userAgent: String = AppConfig.DEFAULT_USER_AGENT
+    val userAgent: String = AppConfig.DEFAULT_USER_AGENT,
+    val platform: BrowserPlatform = MobileUserAgent.detect(userAgent)
 )
 
 data class AppConfig(val lastProfileId: String?, val profiles: List<Profile>) {

@@ -27,15 +27,15 @@ git push origin v1.1.0
 
 ## 使用与配置
 
-- 无配置时，点击 **添加配置**，填写名称、网页 URL 和 JS 在线地址，保存并打开。
+- 无配置时，点击 **添加配置**，填写名称、网页 URL 和 JS 在线地址；可只保存，也可保存并立即打开。
 - 配置列表右下角的 **＋** 悬浮按钮用于添加配置，滚动列表时始终可见。
 - 长按配置卡片或右上角排序图标，上下拖动调整顺序；松手自动写入配置文件，重启和 JSON 导入导出保留顺序。排序不改变最后使用的启动配置。
 - 浏览页贴边悬浮按钮 → **配置管理** 查看所有配置；点击 **打开** 切换，同时记录为下次启动项。
-- **编辑** 修改名称和两个地址；保存后打开该组，并记录为下次启动项。
+- **编辑** 修改名称、地址和平台；**保存**只写入配置并返回列表，**保存并打开**才切换网页并记录为下次启动项。
 - 删除最后使用项时，下次启动使用剩余第一组；删除全部配置后提示添加。
 - **导出 JSON / 导入 JSON** 使用系统文件选择器读写配置文件；导入在确认后替换全部配置。
 - 悬浮菜单中的 **刷新** 重新获取脚本并打开该配置的入口网页，继续遵循浏览器缓存规则。
-- 每组配置支持 **请求 User-Agent（UA）**：新增时填入当前设备的安卓移动浏览器 UA，可编辑、恢复默认，或一键切换为与当前 Chromium 版本一致的 Windows Chrome UA。Windows 预设会同时同步 UA Client Hints 中的平台、架构、位数和移动设备标记。网页、子资源及 JS 准备请求均使用该配置的 UA；支持的系统 WebView 会清空旧式 `X-Requested-With` 应用包名允许列表。旧 JSON 未填写 `userAgent` 时使用设备默认 UA。
+- 每组配置支持 **Apple / Android / Windows 平台预设**及可编辑 UA。平台会随配置保存，并同步网页、子资源、JS 准备请求的 UA 与 UA Client Hints；Apple/Windows 还覆盖页面可见的 `navigator.platform`、`vendor` 和触点数量，避免继续暴露安卓默认值。Windows UA 使用当前 Chromium 版本，Apple 使用 iPhone Safari 18.5，Android 使用设备默认移动 UA。支持的系统 WebView 会清空旧式 `X-Requested-With` 应用包名允许列表；旧 JSON 会从已有 UA 推断平台。
 
 运行时配置保存在应用私有目录 `files/config.json`，原子写入；设置操作都修改此 JSON 文件。`app/src/main/assets/config.json` 是首次安装的空配置模板。`config.example.json` 仅展示格式，不会内置到应用。
 
@@ -57,7 +57,7 @@ git push origin v1.1.0
 
 空配置：`{"version":1,"lastProfileId":null,"profiles":[]}`。非空配置的 `lastProfileId` 必须对应已有项；ID 不重复，名称为 1–60 字符，最多 50 组。地址支持 HTTP/HTTPS，不接受 `file:`、`javascript:` 或带账号密码的 URL。JS 必须是可直接读取的脚本文件，不能填写 GitHub 文件预览页等 HTML 地址。
 
-UA 最长 2048 字符，使用可打印 ASCII，不接受换行和控制字符；更改 UA 后网页内容及服务器按 `Vary: User-Agent` 区分的缓存可能不同。
+UA 最长 2048 字符，使用可打印 ASCII，不接受换行和控制字符；更改平台或 UA 后，网页内容及服务器按 UA/Client Hints 区分的缓存可能不同。平台模拟不改变真实 WebView 内核、TLS 指纹或设备硬件能力。
 
 ## 全屏与扫码
 
@@ -150,7 +150,7 @@ Android 编译、Lint、Kotlin 测试由 GitHub Actions 执行。真机验收重
 6. 脚本获取失败、页面断网、HTTP/证书错误能重试或修改配置。
 7. 成功打开后全屏；悬浮按钮拖动、收起、菜单、刘海及键盘避让正常；扫码取消/返回不刷新网页。
 8. 两个字段扫码准确回填，普通文本仅在扫码复制入口支持，拒绝相机权限可返回。
-9. UA 默认值可改可恢复，JSON 往返保留 UA，旧 JSON 可导入；服务器观察网页和 JS 请求头。
+9. Apple/Android/Windows 平台与 UA 可切换，JSON 往返保留平台，旧 JSON 可导入并推断平台；服务器观察网页和 JS 请求头、UA Client Hints，页面观察 navigator 平台值。
 10. HTTPS 网页的 `navigator.clipboard.writeText()` 和旧式复制按钮有效；无用户点击的脚本复制失败。
 11. 视频全屏切横屏；播放器退出、应用关闭按钮和 Android 返回键均恢复原方向且不重载网页；检查跨域 iframe 播放器、暂停/恢复及全屏中页面跳转。
 12. 油猴脚本无 run-at 时等 DOM 就绪；match/exclude/noframes 正常，require/resource 准备正确，GM 存储重启后保留，命令和日志可查看。

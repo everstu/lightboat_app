@@ -3,12 +3,14 @@ package com.lightboat.app.userscript
 import android.util.Base64
 import com.lightboat.app.AppConfig
 import com.lightboat.app.BrowserScriptLoader
+import com.lightboat.app.BrowserPlatform
 import org.json.JSONObject
 import java.net.URI
 import java.security.MessageDigest
 
 class ScriptPreparer(private val loader: BrowserScriptLoader) {
-    fun prepare(source: String, address: String, userAgent: String, callback: (Result<ScriptBundle>) -> Unit) {
+    fun prepare(source: String, address: String, userAgent: String, platform: BrowserPlatform,
+        callback: (Result<ScriptBundle>) -> Unit) {
         val meta = try { ScriptMetadata.parse(source) } catch (error: Exception) { callback(Result.failure(error)); return }
         val requirements = mutableListOf<String>()
         val resources = JSONObject()
@@ -23,7 +25,7 @@ class ScriptPreparer(private val loader: BrowserScriptLoader) {
             val full = try { AppConfig.normalizeUrl(URI(address).resolve(reference).toString()) } catch (error: Exception) {
                 callback(Result.failure(error)); return
             }
-            loader.loadAsset(full.substringBefore('#'), userAgent, name != null) { result ->
+            loader.loadAsset(full.substringBefore('#'), userAgent, platform, name != null) { result ->
                 result.fold(onSuccess = { asset ->
                     try {
                         val bytes = Base64.decode(asset.getString("base64"), Base64.DEFAULT)

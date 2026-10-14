@@ -46,6 +46,11 @@ class ProfileAdapter(
         row.profileName.text = profile.name
         row.profileUrl.text = profile.url
         row.profileBadge.text = listOfNotNull(
+            context.getString(when (profile.platform) {
+                BrowserPlatform.APPLE -> R.string.platform_apple
+                BrowserPlatform.ANDROID -> R.string.platform_android
+                BrowserPlatform.WINDOWS -> R.string.platform_windows
+            }),
             context.getString(R.string.last_profile).takeIf { profile.id == lastId },
             context.getString(R.string.current_profile).takeIf { profile.id == currentId }
         ).joinToString(" · ")
