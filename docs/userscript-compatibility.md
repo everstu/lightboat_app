@@ -68,6 +68,6 @@ notification 目前是原生应用内文字 Toast，拒绝点击回调、图片�
 
 悬浮菜单 → **调试日志** 可查看准备后的运行时机、主页面/iframe、页面地址、运行结果、错误栈/行号、浏览器错误、媒体元素错误及 GM 请求失败。单个日志文件在进程启动时清空，刷新/切换时保留本次进程记录；不上传日志。`@match` 不符合的网址和 iframe 不执行脚本。
 
-未指定 run-at 的用户脚本默认 document-idle，避免 head/body 为空时立即报错；显式 document-start 保留提前执行。普通 fetch/XHR 和媒体请求由 Chromium 原生处理，不改写播放源或清单，也不转换成 GM 请求；仍遵循浏览器 CORS 规则。
+未指定 run-at 的用户脚本默认 document-idle，避免 head/body 为空时立即报错；显式 document-start 保留提前执行。普通 fetch/XHR、Service Worker 和 MSE/blob 的数据请求由 Chromium 原生处理，不转换成 GM 请求，仍遵循浏览器 CORS 规则。只有媒体元素直接使用的 HTTP(S) 源经过配置媒体代理；blob/data 源既不代理，也不重复写回 src。
 
 官方参考：[Tampermonkey 文档](https://www.tampermonkey.net/documentation.php)。

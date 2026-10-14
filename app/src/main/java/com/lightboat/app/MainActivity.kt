@@ -69,6 +69,8 @@ class MainActivity : AppCompatActivity() {
     private var webView: AppWebView? = null
     private var configuredWebView: AppWebView? = null
     private var systemUserAgentMetadata: UserAgentMetadata? = null
+    private var mediaProxy: MediaRequestProxy? = null
+    private var mediaNetwork: MediaRequestClient? = null
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
     private var generation = 0
@@ -94,6 +96,7 @@ class MainActivity : AppCompatActivity() {
     private val nativeGuardScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("native-guard.js") }
     private val clipboardSupportScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("clipboard-support.js") }
     private val mediaDiagnosticsScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("media-diagnostics.js") }
+    private val mediaRoutingScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("media-request-routing.js") }
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
     private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
@@ -654,7 +657,14 @@ class MainActivity : AppCompatActivity() {
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
         fun isCurrentNavigation() = view === webView && navigationRequest == navigationGeneration
-        DebugLog.event("network", "Chromium native transport; cache=default mediaProxy=false requestReplay=false")
+        val cookies = CookieManager.getInstance()
+        val network = MediaRequestClient(profile.userAgent,
+            cookies = { cookies.getCookie(it) }, saveCookie = { url, cookie -> cookies.setCookie(url, cookie) })
+        mediaNetwork = network
+        val proxy = MediaRequestProxy(network)
+        mediaProxy = proxy
+        proxy.start()
+        DebugLog.event("network", "media element proxy enabled; Chromium fetch/XHR/MSE unchanged; requestReplay=false")
         view.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                 if (isCurrentNavigation()) userScriptHost?.console(message)
@@ -773,6 +783,8 @@ class MainActivity : AppCompatActivity() {
         }
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, guard, setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupportScript, setOf("*"))
+        scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view,
+            mediaRoutingScript.replace("__LIGHTBOAT_MEDIA_PROXY__", JSONObject.quote(proxy.baseUrl)), setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, mediaDiagnosticsScript, setOf("*"))
         MobileUserAgent.navigatorIdentityScript(profile.platform, profile.userAgent)?.let { identity ->
             scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, identity, setOf("*"))
@@ -781,7 +793,7 @@ class MainActivity : AppCompatActivity() {
         scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
         view.onResume()
-        // Configure browser identity before navigation; media stays on the native path.
+        // Browser requests use WebView identity; direct media uses the profile proxy.
         applyProfileUserAgent(view, profile)
         view.loadUrl(profile.url)
     }
@@ -809,8 +821,8 @@ class MainActivity : AppCompatActivity() {
                 javaScriptCanOpenWindowsAutomatically = false
                 allowFileAccess = false
                 allowContentAccess = false
-                // Use the v1.0.0 media policy instead of overriding playback behavior.
-                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                // Direct native media uses a loopback HTTP source; JS requests remain Chromium-owned.
+                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 mediaPlaybackRequiresUserGesture = true
             }
             CookieManager.getInstance().apply {
@@ -964,6 +976,16 @@ class MainActivity : AppCompatActivity() {
             runCatching { view.destroy() }.onFailure {
                 DebugLog.event("webview", "destroy failed ${it.message.orEmpty().take(200)}")
             }
+        }
+        val retiringNetwork = mediaNetwork
+        val retiringProxy = mediaProxy
+        mediaNetwork = null
+        mediaProxy = null
+        runCatching { retiringNetwork?.close() }.onFailure {
+            DebugLog.event("media-error", "network close failed ${it.message.orEmpty()}")
+        }
+        runCatching { retiringProxy?.close() }.onFailure {
+            DebugLog.event("media-error", "proxy close failed ${it.message.orEmpty()}")
         }
         pageReady = false
         pageFailed = false

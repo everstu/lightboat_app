@@ -51,7 +51,7 @@ object DebugLog {
     fun event(area: String, message: String) {
         synchronized(lock) {
             val target = file ?: return
-            val clean = message.replace(Regex("https?://[^\\s\\\"'<>]+", RegexOption.IGNORE_CASE)) {
+            val clean = message.replace(Regex("https?://[^\\s\\\"']+", RegexOption.IGNORE_CASE)) {
                     safeUrl(it.value)
                 }
                 .replace(Regex("(?i)\\b(authorization|cookie)\\s*[:=]\\s*[^\\s,;]+")) {
@@ -78,7 +78,8 @@ object DebugLog {
 
     fun safeUrl(value: String?): String {
         if (value.isNullOrBlank()) return "<empty>"
-        val uri = runCatching { URI(value) }.getOrNull() ?: return "<invalid-url>"
+        // Previously sanitized addresses must not acquire duplicate redaction markers.
+        val uri = runCatching { URI(value.replace("<redacted>", "redacted")) }.getOrNull() ?: return "<invalid-url>"
         val scheme = uri.scheme?.lowercase() ?: return "<invalid-url>"
         val host = uri.host?.lowercase() ?: return "$scheme://<no-host>"
         val port = if (uri.port >= 0) ":${uri.port}" else ""
