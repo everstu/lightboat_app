@@ -118,6 +118,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         fullscreenPlayer = FullscreenPlayer(this, binding.root) { updateChrome() }
         setupProfileList()
+        showAppVersion()
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
@@ -192,6 +193,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchLast() {
         config.lastProfile?.let { openProfile(it) } ?: showProfiles()
+    }
+
+    private fun showAppVersion() {
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+        binding.versionLabel.text = getString(
+            R.string.app_version,
+            packageInfo.versionName.orEmpty(),
+            versionCode,
+        )
     }
 
     private fun currentProfile() = config.profiles.firstOrNull { it.id == currentId }
