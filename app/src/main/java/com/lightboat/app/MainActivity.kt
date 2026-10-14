@@ -68,7 +68,6 @@ class MainActivity : AppCompatActivity() {
     private var config = AppConfig.EMPTY
     private var webView: AppWebView? = null
     private var configuredWebView: AppWebView? = null
-    private var configuredPlatform: BrowserPlatform? = null
     private var systemUserAgentMetadata: UserAgentMetadata? = null
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
@@ -743,12 +742,14 @@ class MainActivity : AppCompatActivity() {
         scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
         view.onResume()
+        // Reapply the selected profile at the actual navigation boundary so every
+        // Chromium request, including media segments started after page load, uses it.
+        applyProfileUserAgent(view, profile)
         view.loadUrl(profile.url)
     }
 
     @SuppressLint("SetJavaScriptEnabled", "RestrictedApi")
     private fun prepareMainWebView(profile: Profile) {
-        val userAgent = profile.userAgent
         val view = webView ?: AppWebView(this).also {
             webView = it
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
@@ -758,7 +759,6 @@ class MainActivity : AppCompatActivity() {
                 systemUserAgentMetadata = WebSettingsCompat.getUserAgentMetadata(view.settings)
             }
             view.settings.apply {
-                userAgentString = userAgent
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
@@ -786,14 +786,14 @@ class MainActivity : AppCompatActivity() {
                 @Suppress("DEPRECATION")
                 WebSettingsCompat.setRequestedWithHeaderOriginAllowList(view.settings, emptySet())
             }
-            applyUserAgentMetadata(view, profile)
             configuredWebView = view
-            configuredPlatform = profile.platform
-        } else if (view.settings.userAgentString != userAgent || configuredPlatform != profile.platform) {
-            if (view.settings.userAgentString != userAgent) view.settings.userAgentString = userAgent
-            applyUserAgentMetadata(view, profile)
-            configuredPlatform = profile.platform
         }
+        applyProfileUserAgent(view, profile)
+    }
+
+    private fun applyProfileUserAgent(view: AppWebView, profile: Profile) {
+        view.settings.userAgentString = profile.userAgent
+        applyUserAgentMetadata(view, profile)
     }
 
     private fun applyUserAgentMetadata(view: AppWebView, profile: Profile) {
@@ -935,7 +935,6 @@ class MainActivity : AppCompatActivity() {
         }
         webView = null
         configuredWebView = null
-        configuredPlatform = null
         pageReady = false
         pageFailed = false
         resetHistoryOnCommit = false
