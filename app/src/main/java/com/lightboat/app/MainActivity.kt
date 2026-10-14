@@ -67,10 +67,12 @@ class MainActivity : AppCompatActivity() {
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
     private var generation = 0
+    private var navigationGeneration = 0L
     private var currentId: String? = null
     private var editingId: String? = null
     private var pageFailed = false
     private var pageReady = false
+    private var resetHistoryOnCommit = false
     private var screen = Screen.PROFILES
     private var exportSnapshot: String? = null
     private var scanTarget: ScanTarget? = null
@@ -241,12 +243,15 @@ class MainActivity : AppCompatActivity() {
             if (immersive) hide(WindowInsetsCompat.Type.systemBars()) else show(WindowInsetsCompat.Type.systemBars())
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes = window.attributes.apply {
-                layoutInDisplayCutoutMode = when {
-                    screen != Screen.BROWSER -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                    else -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                }
+            val desiredCutoutMode = when {
+                screen != Screen.BROWSER -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                else -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            val attributes = window.attributes
+            if (attributes.layoutInDisplayCutoutMode != desiredCutoutMode) {
+                attributes.layoutInDisplayCutoutMode = desiredCutoutMode
+                window.attributes = attributes
             }
         }
         ViewCompat.requestApplyInsets(binding.root)
@@ -387,11 +392,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun cancelDownload() {
         generation++
-        scriptLoader.close()
+        scriptLoader.cancel()
     }
 
     private fun showProfiles() {
         cancelDownload()
+        scriptLoader.close()
         hideKeyboard()
         showScreen(Screen.PROFILES)
         binding.emptyProfiles.visibility = if (config.profiles.isEmpty()) View.VISIBLE else View.GONE
@@ -500,9 +506,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun openProfile(profile: Profile) {
         if (config.lastProfileId != profile.id && !persist(config.select(profile.id))) return
+        val navigationRequest = ++navigationGeneration
         hideKeyboard()
         cancelDownload()
-        destroyWebView()
+        prepareWebViewForProfile(profile)
         currentId = profile.id
         showLoading(R.string.preparing)
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) ||
@@ -510,6 +517,7 @@ class MainActivity : AppCompatActivity() {
             showError(R.string.unsupported_title, getString(R.string.unsupported_message))
             return
         }
+        prepareMainWebView(profile.userAgent)
         val request = generation
         try {
             scriptLoader.load(profile.scriptUrl, profile.userAgent) { result ->
@@ -519,23 +527,27 @@ class MainActivity : AppCompatActivity() {
                             ScriptPreparer(scriptLoader).prepare(script, profile.scriptUrl, profile.userAgent) { prepared ->
                                 if (!isDestroyed && request == generation) {
                                     prepared.fold(onSuccess = { bundle ->
+                                        scriptLoader.close()
                                         try {
                                             val guard = assets.open("native-guard.js").bufferedReader().use { it.readText() }
-                                            createWebView(profile, guard, bundle)
+                                            createWebView(profile, guard, bundle, navigationRequest)
                                         } catch (error: Exception) {
                                             destroyWebView()
                                             showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
                                         }
                                     }, onFailure = { error ->
+                                        scriptLoader.close()
                                         showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
                                     })
                                 }
                             }
                         } catch (error: Exception) {
+                            scriptLoader.close()
                             destroyWebView()
                             showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
                         }
                     }, onFailure = { error ->
+                        scriptLoader.close()
                         showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
                     })
                 }
@@ -547,61 +559,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createWebView(profile: Profile, guard: String, bundle: ScriptBundle) {
-        val view = AppWebView(this)
-        webView = view
-        binding.webContainer.addView(view, android.widget.FrameLayout.LayoutParams(-1, -1))
-        view.settings.apply {
-            userAgentString = profile.userAgent
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            builtInZoomControls = false
-            displayZoomControls = false
-            setSupportZoom(false)
-            setSupportMultipleWindows(false)
-            javaScriptCanOpenWindowsAutomatically = false
-            allowFileAccess = false
-            allowContentAccess = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            // The site controls its playlist; don't require another tap for every next item.
-            mediaPlaybackRequiresUserGesture = false
+    private fun createWebView(profile: Profile, guard: String, bundle: ScriptBundle, navigationRequest: Long) {
+        val view = webView ?: AppWebView(this).also {
+            webView = it
+            binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            // Embedded players commonly need their own session/progress cookie.
-            setAcceptThirdPartyCookies(view, true)
-        }
+        prepareMainWebView(profile.userAgent)
+        fun isCurrentNavigation() = view === webView && navigationRequest == navigationGeneration
         view.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                if (view === webView) userScriptHost?.console(message)
+                if (isCurrentNavigation()) userScriptHost?.console(message)
                 return false
             }
             override fun onShowCustomView(customView: View, callback: WebChromeClient.CustomViewCallback) {
-                if (view !== webView || screen != Screen.BROWSER) { callback.onCustomViewHidden(); return }
+                if (!isCurrentNavigation() || screen != Screen.BROWSER) { callback.onCustomViewHidden(); return }
                 hideKeyboard()
                 fullscreenPlayer.show(customView, callback)
             }
 
-            override fun onHideCustomView() { fullscreenPlayer.hide() }
+            override fun onHideCustomView() { if (isCurrentNavigation()) fullscreenPlayer.hide() }
 
             override fun onProgressChanged(view: WebView, progress: Int) {
-                if (view !== webView || pageFailed) return
+                if (!isCurrentNavigation() || pageFailed) return
                 binding.pageProgress.progress = progress
                 binding.pageProgress.visibility = if (progress < 100) View.VISIBLE else View.GONE
             }
         }
         view.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                if (!isCurrentNavigation()) return true
                 if (request.url.scheme?.lowercase() in setOf("http", "https")) return false
                 if (request.isForMainFrame) toast(getString(R.string.unsafe_link))
                 return true
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                if (view !== webView) return
+                if (!isCurrentNavigation()) return
                 userScriptHost?.resetDocuments()
                 fullscreenPlayer.hide()
                 (view as AppWebView).clearClipboardGesture()
@@ -610,28 +603,33 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
+                if (!isCurrentNavigation()) return
+                if (resetHistoryOnCommit) {
+                    view.clearHistory()
+                    resetHistoryOnCommit = false
+                }
                 revealPage(view)
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
-                if (view !== webView || pageFailed) return
+                if (!isCurrentNavigation() || pageFailed) return
                 revealPage(view)
                 binding.pageProgress.visibility = View.GONE
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame && view === webView) failPage(error.description.toString())
+                if (request.isForMainFrame && isCurrentNavigation()) failPage(error.description.toString())
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
-                if (request.isForMainFrame && view === webView) {
+                if (request.isForMainFrame && isCurrentNavigation()) {
                     failPage(getString(R.string.page_http_error, response.statusCode))
                 }
             }
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 handler.cancel()
-                if (view === webView) failPage(getString(R.string.bad_certificate))
+                if (isCurrentNavigation()) failPage(getString(R.string.bad_certificate))
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -645,7 +643,7 @@ class MainActivity : AppCompatActivity() {
         // Register separate scripts so a syntax error in supplied JS cannot disable the guard.
         // Wildcard deliberately covers redirects, subsequent navigation and child frames.
         WebViewCompat.addWebMessageListener(view, "LightboatClipboard", setOf("*")) { sender, message, origin, _, reply ->
-            if (sender !== webView || message.type != WebMessageCompat.TYPE_STRING) return@addWebMessageListener
+            if (!isCurrentNavigation() || sender !== webView || message.type != WebMessageCompat.TYPE_STRING) return@addWebMessageListener
             val payload = runCatching { JSONObject(message.data.orEmpty()) }.getOrNull() ?: return@addWebMessageListener
             val id = payload.optString("id")
             if (id.isEmpty() || id.length > 64) return@addWebMessageListener
@@ -669,7 +667,58 @@ class MainActivity : AppCompatActivity() {
         userScriptHost = UserScriptHost(this, view, profile, bundle)
         scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
+        view.onResume()
         view.loadUrl(profile.url)
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun prepareMainWebView(userAgent: String) {
+        val view = webView ?: AppWebView(this).also {
+            webView = it
+            binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
+        }
+        view.settings.apply {
+            userAgentString = userAgent
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            cacheMode = WebSettings.LOAD_DEFAULT
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            builtInZoomControls = false
+            displayZoomControls = false
+            setSupportZoom(false)
+            setSupportMultipleWindows(false)
+            javaScriptCanOpenWindowsAutomatically = false
+            allowFileAccess = false
+            allowContentAccess = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            // The site controls its playlist; don't require another tap for every next item.
+            mediaPlaybackRequiresUserGesture = false
+        }
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            // Embedded players commonly need their own session/progress cookie.
+            setAcceptThirdPartyCookies(view, true)
+        }
+    }
+
+    private fun prepareWebViewForProfile(profile: Profile) {
+        fullscreenPlayer.hide()
+        userScriptHost?.close()
+        userScriptHost = null
+        scriptHandlers.forEach { runCatching { it.remove() } }
+        scriptHandlers.clear()
+        webView?.let { view ->
+            runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatClipboard") }
+            runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatGM") }
+            view.evaluateJavascript("document.querySelectorAll('video,audio').forEach(media => media.pause())", null)
+            view.stopLoading()
+            view.onPause()
+        }
+        pageReady = false
+        pageFailed = false
+        resetHistoryOnCommit = true
+        webView?.settings?.userAgentString = profile.userAgent
     }
 
     private fun revealPage(view: WebView) {
@@ -769,6 +818,8 @@ class MainActivity : AppCompatActivity() {
         scriptHandlers.forEach { runCatching { it.remove() } }
         scriptHandlers.clear()
         webView?.let { view ->
+            runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatClipboard") }
+            runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatGM") }
             binding.webContainer.removeView(view)
             view.stopLoading()
             view.webChromeClient = null
@@ -778,6 +829,8 @@ class MainActivity : AppCompatActivity() {
         webView = null
         pageReady = false
         pageFailed = false
+        resetHistoryOnCommit = false
+        navigationGeneration++
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -819,6 +872,7 @@ class MainActivity : AppCompatActivity() {
         nativeDialog = null
         cancelDownload()
         worker.shutdownNow()
+        scriptLoader.close()
         destroyWebView()
         super.onDestroy()
     }

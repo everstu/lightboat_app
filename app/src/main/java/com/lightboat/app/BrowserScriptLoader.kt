@@ -23,6 +23,8 @@ class BrowserScriptLoader(
     private var view: WebView? = null
     private val handler = Handler(Looper.getMainLooper())
     private var timeout: Runnable? = null
+    private var requestSerial = 0L
+    private var activeRequest = 0L
 
     @SuppressLint("SetJavaScriptEnabled")
     fun load(url: String, userAgent: String, callback: (Result<String>) -> Unit) {
@@ -35,14 +37,17 @@ class BrowserScriptLoader(
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun loadInternal(url: String, userAgent: String, mode: String, callback: (Result<JSONObject>) -> Unit) {
-        close()
+        cancel()
         val parsed = URI(url)
         val origin = URI(parsed.scheme.lowercase(), null, parsed.host.lowercase(), parsed.port, null, null, null).toString()
-        val loader = WebView(context)
-        view = loader
-        loader.alpha = 0f
-        loader.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        container.addView(loader, ViewGroup.LayoutParams(1, 1))
+        val loader = view ?: WebView(context).also {
+            view = it
+            it.alpha = 0f
+            it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            container.addView(it, ViewGroup.LayoutParams(1, 1))
+        }
+        loader.stopLoading()
+        runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
         loader.settings.apply {
             userAgentString = userAgent
             javaScriptEnabled = true
@@ -52,9 +57,15 @@ class BrowserScriptLoader(
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             blockNetworkImage = true
         }
+        val request = ++requestSerial
+        activeRequest = request
         fun finish(result: Result<JSONObject>) {
-            if (view !== loader) return
-            close()
+            if (view !== loader || activeRequest != request) return
+            activeRequest = 0L
+            timeout?.let { handler.removeCallbacks(it) }
+            timeout = null
+            runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
+            if (result.isFailure) loader.stopLoading()
             callback(result)
         }
         loader.webViewClient = object : WebViewClient() {
@@ -64,6 +75,7 @@ class BrowserScriptLoader(
             }
             override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
                 finish(Result.failure(IllegalStateException("脚本准备进程已退出，请重试")))
+                close()
                 return true
             }
         }
@@ -87,11 +99,22 @@ class BrowserScriptLoader(
         loader.loadDataWithBaseURL("$origin/", html, "text/html", "UTF-8", null)
     }
 
-    fun close() {
+    fun cancel() {
         timeout?.let { handler.removeCallbacks(it) }
         timeout = null
+        val hadActiveRequest = activeRequest != 0L
+        activeRequest = 0L
+        if (hadActiveRequest) view?.let { loader ->
+            runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
+            loader.stopLoading()
+        }
+    }
+
+    fun close() {
+        cancel()
         view?.let { loader ->
             view = null
+            runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
             container.removeView(loader)
             loader.stopLoading()
             loader.webViewClient = WebViewClient()
