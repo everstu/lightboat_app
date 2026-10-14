@@ -1,7 +1,10 @@
 package com.lightboat.app
 
 import android.content.Context
+import android.os.Process
 import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -21,13 +24,28 @@ object DebugLog {
     private var initialized = false
 
     fun initialize(context: Context) {
+        val app = context.applicationContext
+        val preferences = app.getSharedPreferences("debug-log", Context.MODE_PRIVATE)
+        val previousCrash: String?
         synchronized(lock) {
             if (initialized) return
-            file = File(context.applicationContext.filesDir, "debug.log")
+            file = File(app.filesDir, "debug.log")
             runCatching { file!!.writeText("", Charsets.UTF_8) }
             initialized = true
+            previousCrash = preferences.getString("previous-crash", null)
+            preferences.edit().remove("previous-crash").apply()
         }
         event("app", "process started")
+        previousCrash?.let { event("previous-crash", it) }
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            val trace = StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString().take(16_000)
+            event("crash", "thread=${thread.name} $trace")
+            preferences.edit().putString("previous-crash", "thread=${thread.name} $trace").commit()
+            if (previousHandler != null) previousHandler.uncaughtException(thread, error) else {
+                Process.killProcess(Process.myPid())
+            }
+        }
     }
 
     fun event(area: String, message: String) {
@@ -79,10 +97,27 @@ object DebugLog {
     fun shouldTraceUrl(value: String?): Boolean {
         val uri = runCatching { URI(value.orEmpty()) }.getOrNull() ?: return false
         val path = uri.path.orEmpty().lowercase()
-        return path.contains("/api/") || path.contains("meta") || path.endsWith(
-            ".m3u8"
-        ) || path.endsWith(".mp4") || path.endsWith(".m4s") || path.endsWith(".ts") ||
-            path.endsWith(".mp3") || path.endsWith(".m4a") || path.endsWith(".aac") || path.endsWith(".key") ||
+        return path.contains("/api/") || path.contains("meta") || isMediaUrl(value) ||
             uri.rawQuery.orEmpty().contains("ep=", ignoreCase = true)
+    }
+
+    fun isMediaUrl(value: String?): Boolean {
+        val uri = runCatching { URI(value.orEmpty()) }.getOrNull() ?: return false
+        val path = uri.path.orEmpty().lowercase()
+        return path.endsWith(".m3u8") || path.endsWith(".mpd") || path.endsWith(".mp4") ||
+            path.endsWith(".m4s") || path.endsWith(".ts") ||
+            path.endsWith(".mp3") || path.endsWith(".m4a") || path.endsWith(".aac") || path.endsWith(".key") ||
+            path.endsWith(".webm") || path.endsWith(".ogg") || path.endsWith(".ogv")
+    }
+
+    fun isMediaRequest(value: String?, headers: Map<String, String>): Boolean {
+        if (isMediaUrl(value)) return true
+        fun header(name: String) = headers.entries.firstOrNull { it.key.equals(name, true) }?.value.orEmpty().lowercase()
+        val accept = header("Accept")
+        val destination = header("Sec-Fetch-Dest")
+        return headers.keys.any { it.equals("Range", true) } || destination in setOf("audio", "video", "track") ||
+            accept.contains("video/") || accept.contains("audio/") ||
+            accept.contains("application/vnd.apple.mpegurl") || accept.contains("application/x-mpegurl") ||
+            accept.contains("application/dash+xml")
     }
 }

@@ -153,10 +153,15 @@ class BrowserScriptLoader(
             configuredPlatform = null
             systemUserAgentMetadata = null
             runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
-            container.removeView(loader)
-            loader.stopLoading()
-            loader.webViewClient = WebViewClient()
-            loader.destroy()
+            runCatching { container.removeView(loader) }
+            runCatching { loader.stopLoading() }
+            runCatching { loader.onPause() }
+            runCatching { loader.webViewClient = WebViewClient() }
+            container.post {
+                runCatching { loader.destroy() }.onFailure {
+                    DebugLog.event("script-loader", "destroy failed ${it.message.orEmpty().take(200)}")
+                }
+            }
         }
     }
 

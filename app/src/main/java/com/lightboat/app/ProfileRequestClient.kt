@@ -80,7 +80,6 @@ class ProfileRequestClient(
         calls.clear()
         client.dispatcher.cancelAll()
         client.connectionPool.evictAll()
-        client.dispatcher.executorService.shutdownNow()
         DebugLog.event("network", "profile transport closed")
     }
 }

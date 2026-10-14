@@ -983,35 +983,51 @@ class MainActivity : AppCompatActivity() {
 
     private fun destroyWebView() {
         DebugLog.event("webview", "destroy active=${webView != null} profile=${currentId.orEmpty()}")
-        userScriptHost?.close()
+        val retiringView = webView
+        webView = null
+        configuredWebView = null
+        navigationGeneration++
+        runCatching { userScriptHost?.close() }.onFailure {
+            DebugLog.event("webview", "script host close failed ${it.message.orEmpty().take(200)}")
+        }
         userScriptHost = null
-        fullscreenPlayer.hide()
+        runCatching { fullscreenPlayer.hide() }.onFailure {
+            DebugLog.event("webview", "fullscreen close failed ${it.message.orEmpty().take(200)}")
+        }
         scriptHandlers.forEach { runCatching { it.remove() } }
         scriptHandlers.clear()
-        webView?.let { view ->
+        retiringView?.let { view ->
             runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatClipboard") }
             runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatGM") }
-            binding.webContainer.removeView(view)
-            view.stopLoading()
-            view.webChromeClient = null
-            view.webViewClient = WebViewClient()
-            view.destroy()
+            runCatching { binding.webContainer.removeView(view) }
+            runCatching { view.stopLoading() }
+            runCatching { view.onPause() }
+            runCatching { view.webChromeClient = null }
+            runCatching { view.webViewClient = WebViewClient() }
+            binding.root.post {
+                runCatching { view.destroy() }.onFailure {
+                    DebugLog.event("webview", "destroy failed ${it.message.orEmpty().take(200)}")
+                }
+            }
         }
-        webView = null
         closeProfileNetwork()
-        configuredWebView = null
         pageReady = false
         pageFailed = false
-        navigationGeneration++
     }
 
     private fun closeProfileNetwork() {
         DebugLog.event("network", "close mediaProxy=${mediaProxy != null} profileNetwork=${profileNetwork != null}")
         requestInterceptor = null
-        mediaProxy?.close()
+        val retiringProxy = mediaProxy
+        val retiringNetwork = profileNetwork
         mediaProxy = null
-        profileNetwork?.close()
         profileNetwork = null
+        runCatching { retiringProxy?.close() }.onFailure {
+            DebugLog.event("network", "media proxy close failed ${it.message.orEmpty().take(200)}")
+        }
+        runCatching { retiringNetwork?.close() }.onFailure {
+            DebugLog.event("network", "profile network close failed ${it.message.orEmpty().take(200)}")
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
