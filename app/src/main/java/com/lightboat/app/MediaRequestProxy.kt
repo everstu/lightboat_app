@@ -10,7 +10,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 
 /** Only loopback sees the native player's UA. Upstream always sees the profile's UA. */
-class MediaRequestProxy(private val network: ProfileRequestClient) : NanoHTTPD("127.0.0.1", 0) {
+internal class MediaRequestProxy(
+    private val network: ProfileRequestClient,
+    private val allowLoopbackUpstreamForTests: Boolean = false
+) : NanoHTTPD("127.0.0.1", 0) {
     val token: String = UUID.randomUUID().toString()
     val baseUrl get() = "http://127.0.0.1:$listeningPort/$token/media"
     private val workers = Executors.newFixedThreadPool(6)
@@ -56,7 +59,7 @@ class MediaRequestProxy(private val network: ProfileRequestClient) : NanoHTTPD("
         val uri = runCatching { URI(remote) }.getOrNull()
         val host = uri?.host?.lowercase()?.removeSurrounding("[", "]")
         if (remote.length > 8192 || uri?.scheme !in setOf("http", "https") || host == null || uri?.rawUserInfo != null ||
-            host == "localhost" || isLoopback(host)) {
+            !allowLoopbackUpstreamForTests && (host == "localhost" || isLoopback(host))) {
             return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Invalid media URL")
         }
         val remoteUri = requireNotNull(uri)

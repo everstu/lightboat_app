@@ -18,7 +18,7 @@ class MediaRequestProxyTest {
             upstream.enqueue(MockResponse().setResponseCode(206).setBody("video bytes")
                 .setHeader("Content-Range", "bytes 0-10/100"))
             val network = ProfileRequestClient(ua, cookies = { "session=one" })
-            val proxy = MediaRequestProxy(network)
+            val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
                 val browser = OkHttpClient()
