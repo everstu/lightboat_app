@@ -63,11 +63,23 @@ class UserScriptHost(
         }
     }
 
+    fun pageCommitted(url: String?) {
+        if (url == null) return
+        val uri = runCatching { URI(url) }.getOrNull() ?: return
+        val address = "${uri.host}${uri.path}"
+        if (!bundle.metadata.matchesPage(url)) {
+            log("warning", "当前页面 $address 不符合 @match/@include，脚本不会执行；请核对脚本支持的网址")
+        }
+    }
+
     fun install(): ScriptHandler {
         val meta = bundle.metadata
         log("info", "${meta.name}：${meta.runAt}；授权 ${meta.grants.joinToString().ifEmpty { "无" }}")
         if (!meta.isUserscript) log("info", "普通 JS 使用 document-start")
         if (meta.isUserscript && !meta.matchesPage(profile.url)) log("warning", "入口网址不符合脚本匹配规则，当前入口不会运行脚本")
+        if (Regex("""\b(?:eval|Function)\s*\(""").containsMatchIn(bundle.source) || "WebAssembly.compile" in bundle.source) {
+            log("warning", "脚本包含动态代码执行；已正常注入，但网页 CSP 可能阻止解密后的代码运行")
+        }
         WebViewCompat.addWebMessageListener(view, "LightboatGM", setOf("*")) { sender, message, origin, main, reply ->
             if (!alive || sender !== view || message.type != WebMessageCompat.TYPE_STRING) return@addWebMessageListener
             val raw = message.data ?: return@addWebMessageListener

@@ -73,6 +73,17 @@ test('Default idle execution waits for a body and executes once after DOMContent
   assert.match(executed.text, /主页面；example\.com\/page/);
 });
 
+test('Reports matching before execution and explains CSP dynamic-code failures', async () => {
+  const h = harness({ grant: ['none'], name: 'Encrypted script' }, { state: 'complete' });
+  h.run('window.injected=true;');
+  assert.ok(h.messages.some(message => message.op === 'log' && message.text.includes('已匹配')));
+  h.listeners.securitypolicyviolation({ blockedURI: 'eval', effectiveDirective: 'script-src' });
+  assert.ok(h.messages.some(message => message.op === 'log' && message.level === 'error' &&
+    message.text.includes('CSP 阻止动态代码执行')));
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(h.context.window.injected, true);
+});
+
 test('Document-start runs immediately, document-body waits only for the body', () => {
   const early = harness({ runAt: 'document-start', grant: ['none'] });
   early.run('window.started=true;');

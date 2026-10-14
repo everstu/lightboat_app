@@ -60,7 +60,6 @@ class ScriptNetwork(private val meta: ScriptMetadata, private val userAgent: Str
                         connection.connectTimeout = remaining.toInt()
                         connection.readTimeout = remaining.toInt()
                         connection.requestMethod = method
-                        connection.setRequestProperty("User-Agent", userAgent)
                         if (!details.optBoolean("anonymous")) CookieManager.getInstance().getCookie(current)?.let {
                             connection.setRequestProperty("Cookie", it)
                         }
@@ -73,8 +72,10 @@ class ScriptNetwork(private val meta: ScriptMetadata, private val userAgent: Str
                             require(lower !in setOf("host", "content-length", "connection", "transfer-encoding", "cookie", "proxy-authorization")) {
                                 "不支持覆盖请求头 $name"
                             }
-                            if (sameInitialOrigin || lower !in setOf("authorization", "origin", "referer")) connection.setRequestProperty(name, value)
+                            if (lower != "user-agent" && (sameInitialOrigin || lower !in setOf("authorization", "origin", "referer"))) connection.setRequestProperty(name, value)
                         }
+                        // The profile owns request identity, including script headers and redirects.
+                        connection.setRequestProperty("User-Agent", userAgent)
                         if (body != null && method !in setOf("GET", "HEAD")) {
                             connection.doOutput = true
                             val requestBytes = body ?: ByteArray(0)

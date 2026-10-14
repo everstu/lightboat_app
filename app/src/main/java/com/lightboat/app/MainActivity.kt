@@ -42,6 +42,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.ScriptHandler
 import androidx.webkit.UserAgentMetadata
+import androidx.webkit.ServiceWorkerClientCompat
+import androidx.webkit.ServiceWorkerControllerCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -69,6 +71,11 @@ class MainActivity : AppCompatActivity() {
     private var webView: AppWebView? = null
     private var configuredWebView: AppWebView? = null
     private var systemUserAgentMetadata: UserAgentMetadata? = null
+    private var mediaProxy: MediaRequestProxy? = null
+    private var profileNetwork: ProfileRequestClient? = null
+    @Volatile private var requestInterceptor: ProfileRequestInterceptor? = null
+    private val mediaCache by lazy { okhttp3.Cache(java.io.File(cacheDir, "media-http"), 64L * 1024 * 1024) }
+    private val httpTransport by lazy { okhttp3.OkHttpClient.Builder().cache(mediaCache).build() }
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
     private var generation = 0
@@ -95,6 +102,7 @@ class MainActivity : AppCompatActivity() {
     private val nativeGuardScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("native-guard.js") }
     private val clipboardSupportScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("clipboard-support.js") }
     private val mediaDiagnosticsScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("media-diagnostics.js") }
+    private val mediaRoutingScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("media-request-routing.js") }
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
     private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
@@ -164,6 +172,13 @@ class MainActivity : AppCompatActivity() {
         windowsUserAgent = MobileUserAgent.windowsChrome(defaultUserAgent)
         store = ConfigStore(this, defaultUserAgent)
         scriptLoader = BrowserScriptLoader(this, binding.webContainer)
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE) &&
+            WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST)) {
+            ServiceWorkerControllerCompat.getInstance().setServiceWorkerClient(object : ServiceWorkerClientCompat() {
+                override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? =
+                    requestInterceptor?.intercept(request)
+            })
+        }
         binding.edgeMenuButton.setOnClickListener { showBrowserMenu() }
         binding.scanWebsiteButton.setOnClickListener { startScan(ScanTarget.WEBSITE) }
         binding.scanScriptButton.setOnClickListener { startScan(ScanTarget.SCRIPT) }
@@ -627,6 +642,15 @@ class MainActivity : AppCompatActivity() {
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
         fun isCurrentNavigation() = view === webView && navigationRequest == navigationGeneration
+        val cookies = CookieManager.getInstance()
+        val network = ProfileRequestClient(profile.userAgent, httpTransport,
+            cookies = { cookies.getCookie(it) }, saveCookie = { url, cookie -> cookies.setCookie(url, cookie) })
+        profileNetwork = network
+        val interceptor = ProfileRequestInterceptor(profile.userAgent, network)
+        requestInterceptor = interceptor
+        val proxy = MediaRequestProxy(network)
+        mediaProxy = proxy
+        proxy.start()
         view.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                 if (isCurrentNavigation()) userScriptHost?.console(message)
@@ -657,6 +681,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         view.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                interceptor.intercept(request)
+
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!isCurrentNavigation()) return true
                 if (request.url.scheme?.lowercase() in setOf("http", "https")) return false
@@ -675,6 +702,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 if (!isCurrentNavigation()) return
+                userScriptHost?.pageCommitted(url)
                 if (resetHistoryOnCommit) {
                     view.clearHistory()
                     resetHistoryOnCommit = false
@@ -734,6 +762,8 @@ class MainActivity : AppCompatActivity() {
         }
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, guard, setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupportScript, setOf("*"))
+        scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view,
+            mediaRoutingScript.replace("__LIGHTBOAT_MEDIA_PROXY__", JSONObject.quote(proxy.baseUrl)), setOf("*"))
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, mediaDiagnosticsScript, setOf("*"))
         MobileUserAgent.navigatorIdentityScript(profile.platform, profile.userAgent)?.let { identity ->
             scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, identity, setOf("*"))
@@ -742,8 +772,7 @@ class MainActivity : AppCompatActivity() {
         scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
         view.onResume()
-        // Reapply the selected profile at the actual navigation boundary so every
-        // Chromium request, including media segments started after page load, uses it.
+        // Chromium requests use this identity; native media uses the session proxy.
         applyProfileUserAgent(view, profile)
         view.loadUrl(profile.url)
     }
@@ -823,6 +852,7 @@ class MainActivity : AppCompatActivity() {
             view.stopLoading()
             view.onPause()
         }
+        closeProfileNetwork()
         pageReady = false
         pageFailed = false
         resetHistoryOnCommit = true
@@ -934,11 +964,20 @@ class MainActivity : AppCompatActivity() {
             view.destroy()
         }
         webView = null
+        closeProfileNetwork()
         configuredWebView = null
         pageReady = false
         pageFailed = false
         resetHistoryOnCommit = false
         navigationGeneration++
+    }
+
+    private fun closeProfileNetwork() {
+        requestInterceptor = null
+        mediaProxy?.close()
+        mediaProxy = null
+        profileNetwork?.close()
+        profileNetwork = null
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

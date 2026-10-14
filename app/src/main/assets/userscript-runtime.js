@@ -268,8 +268,15 @@ function LightboatRuntime(spec, entry) {
   window.addEventListener('unhandledrejection', event => {
     if (String(event.reason?.stack || '').includes('lightboat-userscript')) report('error', errorText(event.reason));
   });
+  document.addEventListener('securitypolicyviolation', event => {
+    if (['eval', 'wasm-eval'].includes(event.blockedURI)) {
+      report('error', '网页 CSP 阻止动态代码执行（' + event.effectiveDirective +
+        '）；混淆脚本已注入，但其中的 eval/new Function/WebAssembly 可能无法运行');
+    }
+  });
   window.addEventListener('pagehide', () => { try { post({ op: 'dispose' }); } catch (_) {} });
   const hello = rpc('hello').promise;
+  report('info', meta.name + ' 已匹配（' + executionContext + '）；等待 ' + meta.runAt);
   if ([...grants].some(grant => /(?:Value|Values)/.test(grant))) {
     hello.then(snapshot => { Object.assign(values, snapshot); schedule(); }).catch(error => report('error', errorText(error)));
   } else { hello.catch(error => report('error', errorText(error))); schedule(); }

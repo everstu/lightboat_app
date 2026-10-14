@@ -35,7 +35,7 @@ git push origin v1.1.0
 - 删除最后使用项时，下次启动使用剩余第一组；删除全部配置后提示添加。
 - **导出 JSON / 导入 JSON** 使用系统文件选择器读写配置文件；导入在确认后替换全部配置。
 - 悬浮菜单中的 **刷新** 重新获取脚本并打开该配置的入口网页，继续遵循浏览器缓存规则。
-- 每组配置支持 **Apple / Android / Windows 平台预设**及可编辑 UA。平台会随配置保存，并同步网页、子资源、JS 准备请求的 UA 与 UA Client Hints；Apple/Windows 还覆盖页面可见的 `navigator.platform`、`vendor` 和触点数量，避免继续暴露安卓默认值。Windows UA 使用当前 Chromium 版本，Apple 使用 iPhone Safari 18.5，Android 使用设备默认移动 UA。支持的系统 WebView 会清空旧式 `X-Requested-With` 应用包名允许列表；旧 JSON 会从已有 UA 推断平台。
+- 每组配置支持 **Apple / Android / Windows 平台预设**及可编辑 UA。平台会随配置保存，并同步网页、子资源、Service Worker、用户脚本请求和原生音视频请求的 UA 与 UA Client Hints；Apple/Windows 还覆盖页面可见的 `navigator.platform`、`vendor` 和触点数量，避免继续暴露安卓默认值。Windows UA 使用当前 Chromium 版本，Apple 使用 iPhone Safari 18.5，Android 使用设备默认移动 UA。支持的系统 WebView 会清空旧式 `X-Requested-With` 应用包名允许列表；旧 JSON 会从已有 UA 推断平台。
 
 运行时配置保存在应用私有目录 `files/config.json`，原子写入；设置操作都修改此 JSON 文件。`app/src/main/assets/config.json` 是首次安装的空配置模板。`config.example.json` 仅展示格式，不会内置到应用。
 
@@ -58,6 +58,8 @@ git push origin v1.1.0
 空配置：`{"version":1,"lastProfileId":null,"profiles":[]}`。非空配置的 `lastProfileId` 必须对应已有项；ID 不重复，名称为 1–60 字符，最多 50 组。地址支持 HTTP/HTTPS，不接受 `file:`、`javascript:` 或带账号密码的 URL。JS 必须是可直接读取的脚本文件，不能填写 GitHub 文件预览页等 HTML 地址。
 
 UA 最长 2048 字符，使用可打印 ASCII，不接受换行和控制字符；更改平台或 UA 后，网页内容及服务器按 UA/Client Hints 区分的缓存可能不同。平台模拟不改变真实 WebView 内核、TLS 指纹或设备硬件能力。
+
+Android WebView 的原生媒体加载器可能绕过 `WebSettings.userAgentString`。应用在文档开始时把 HTTP(S) 音视频地址路由到仅监听本机回环地址的会话代理，再由共享 HTTP 客户端使用配置 UA 请求上游；HLS 播放列表、分片、密钥、初始化片段及普通音视频 Range 请求保留 Cookie、Referer、重定向和缓存语义。代理地址带每次浏览随机令牌，切换配置或销毁网页后立即关闭；上游失败时不会用系统 UA 重试。
 
 ## 全屏与扫码
 
