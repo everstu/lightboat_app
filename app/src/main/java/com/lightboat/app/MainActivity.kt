@@ -41,6 +41,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.ScriptHandler
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import androidx.webkit.WebMessageCompat
@@ -66,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     private var config = AppConfig.EMPTY
     private var webView: AppWebView? = null
     private var configuredWebView: AppWebView? = null
+    private var systemUserAgentMetadata: UserAgentMetadata? = null
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
     private var generation = 0
@@ -80,6 +83,7 @@ class MainActivity : AppCompatActivity() {
     private var scanTarget: ScanTarget? = null
     private var nativeDialog: Dialog? = null
     private lateinit var defaultUserAgent: String
+    private lateinit var windowsUserAgent: String
     private lateinit var fullscreenPlayer: FullscreenPlayer
     private var userScriptHost: UserScriptHost? = null
     private lateinit var profileAdapter: ProfileAdapter
@@ -154,6 +158,7 @@ class MainActivity : AppCompatActivity() {
             insets
         }
         defaultUserAgent = MobileUserAgent.default(this)
+        windowsUserAgent = MobileUserAgent.windowsChrome(defaultUserAgent)
         store = ConfigStore(this, defaultUserAgent)
         scriptLoader = BrowserScriptLoader(this, binding.webContainer)
         binding.edgeMenuButton.setOnClickListener { showBrowserMenu() }
@@ -161,6 +166,10 @@ class MainActivity : AppCompatActivity() {
         binding.scanScriptButton.setOnClickListener { startScan(ScanTarget.SCRIPT) }
         binding.resetUserAgentButton.setOnClickListener {
             binding.userAgentInput.setText(defaultUserAgent)
+            binding.userAgentInput.error = null
+        }
+        binding.windowsUserAgentButton.setOnClickListener {
+            binding.userAgentInput.setText(windowsUserAgent)
             binding.userAgentInput.error = null
         }
         binding.settingsButton.setOnClickListener { showProfiles() }
@@ -709,6 +718,9 @@ class MainActivity : AppCompatActivity() {
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
         if (configuredWebView !== view) {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+                systemUserAgentMetadata = WebSettingsCompat.getUserAgentMetadata(view.settings)
+            }
             view.settings.apply {
                 userAgentString = userAgent
                 javaScriptEnabled = true
@@ -734,10 +746,26 @@ class MainActivity : AppCompatActivity() {
                 // Embedded players commonly need their own session/progress cookie.
                 setAcceptThirdPartyCookies(view, true)
             }
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+                @Suppress("DEPRECATION")
+                WebSettingsCompat.setRequestedWithHeaderOriginAllowList(view.settings, emptySet())
+            }
+            applyUserAgentMetadata(view, userAgent)
             configuredWebView = view
         } else if (view.settings.userAgentString != userAgent) {
             view.settings.userAgentString = userAgent
+            applyUserAgentMetadata(view, userAgent)
         }
+    }
+
+    private fun applyUserAgentMetadata(view: AppWebView, userAgent: String) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return
+        val metadata = if (MobileUserAgent.isWindowsChrome(userAgent)) {
+            MobileUserAgent.windowsMetadata(userAgent)
+        } else {
+            systemUserAgentMetadata
+        }
+        if (metadata != null) WebSettingsCompat.setUserAgentMetadata(view.settings, metadata)
     }
 
     private fun updatePageProgress(progress: Int, visible: Boolean) {
@@ -764,7 +792,6 @@ class MainActivity : AppCompatActivity() {
         pageReady = false
         pageFailed = false
         resetHistoryOnCommit = true
-        webView?.settings?.userAgentString = profile.userAgent
     }
 
     private fun revealPage(view: WebView) {

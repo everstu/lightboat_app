@@ -35,7 +35,7 @@ git push origin v1.1.0
 - 删除最后使用项时，下次启动使用剩余第一组；删除全部配置后提示添加。
 - **导出 JSON / 导入 JSON** 使用系统文件选择器读写配置文件；导入在确认后替换全部配置。
 - 悬浮菜单中的 **刷新** 重新获取脚本并打开该配置的入口网页，继续遵循浏览器缓存规则。
-- 每组配置支持 **请求 User-Agent（UA）**：新增时填入当前设备的安卓移动浏览器 UA，可编辑或恢复默认。网页、子资源及 JS 准备请求均使用该配置的 UA。旧 JSON 未填写 `userAgent` 时使用设备默认 UA。
+- 每组配置支持 **请求 User-Agent（UA）**：新增时填入当前设备的安卓移动浏览器 UA，可编辑、恢复默认，或一键切换为与当前 Chromium 版本一致的 Windows Chrome UA。Windows 预设会同时同步 UA Client Hints 中的平台、架构、位数和移动设备标记。网页、子资源及 JS 准备请求均使用该配置的 UA；支持的系统 WebView 会清空旧式 `X-Requested-With` 应用包名允许列表。旧 JSON 未填写 `userAgent` 时使用设备默认 UA。
 
 运行时配置保存在应用私有目录 `files/config.json`，原子写入；设置操作都修改此 JSON 文件。`app/src/main/assets/config.json` 是首次安装的空配置模板。`config.example.json` 仅展示格式，不会内置到应用。
 
