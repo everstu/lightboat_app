@@ -19,6 +19,20 @@ import org.json.JSONObject
 import java.net.URI
 import java.util.UUID
 
+private object UserScriptAssets {
+    private var matcher: String? = null
+    private var runtime: String? = null
+
+    @Synchronized
+    fun load(activity: Activity): Pair<String, String> {
+        val cachedMatcher = matcher ?: activity.applicationContext.assets.open("userscript-matcher.js")
+            .bufferedReader().use { it.readText() }.also { matcher = it }
+        val cachedRuntime = runtime ?: activity.applicationContext.assets.open("userscript-runtime.js")
+            .bufferedReader().use { it.readText() }.also { runtime = it }
+        return cachedMatcher to cachedRuntime
+    }
+}
+
 class UserScriptHost(
     private val activity: Activity,
     private val view: AppWebView,
@@ -140,8 +154,7 @@ class UserScriptHost(
             } catch (error: Exception) { log("error", error.message.orEmpty()); respond(error = error.message ?: "GM 调用失败") }
         }
         if (!meta.isUserscript) return WebViewCompat.addDocumentStartJavaScript(view, bundle.source + "\n//# sourceURL=lightboat-userscript.js", setOf("*"))
-        val matcher = activity.assets.open("userscript-matcher.js").bufferedReader().use { it.readText() }
-        val runtime = activity.assets.open("userscript-runtime.js").bufferedReader().use { it.readText() }
+        val (matcher, runtime) = UserScriptAssets.load(activity)
         return WebViewCompat.addDocumentStartJavaScript(view, bundle.bootstrap("$matcher\n$runtime", token, profile.scriptUrl), setOf("*"))
     }
 

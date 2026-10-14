@@ -4,9 +4,8 @@ import android.content.Context
 import android.util.AtomicFile
 import java.io.File
 
-class ConfigStore(context: Context) {
+class ConfigStore(context: Context, private val defaultUserAgent: String) {
     private val assets = context.assets
-    private val defaultUserAgent = MobileUserAgent.default(context)
     private val file = File(context.filesDir, "config.json")
     private val atomicFile = AtomicFile(file)
 

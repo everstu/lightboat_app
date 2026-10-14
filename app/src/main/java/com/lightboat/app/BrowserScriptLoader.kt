@@ -25,6 +25,10 @@ class BrowserScriptLoader(
     private var timeout: Runnable? = null
     private var requestSerial = 0L
     private var activeRequest = 0L
+    private var configuredView: WebView? = null
+    private val fetchCode by lazy(LazyThreadSafetyMode.NONE) {
+        context.assets.open("fetch-script.js").bufferedReader().use { it.readText() }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     fun load(url: String, userAgent: String, callback: (Result<String>) -> Unit) {
@@ -48,14 +52,19 @@ class BrowserScriptLoader(
         }
         loader.stopLoading()
         runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
-        loader.settings.apply {
-            userAgentString = userAgent
-            javaScriptEnabled = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            allowFileAccess = false
-            allowContentAccess = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            blockNetworkImage = true
+        if (configuredView !== loader) {
+            loader.settings.apply {
+                userAgentString = userAgent
+                javaScriptEnabled = true
+                cacheMode = WebSettings.LOAD_DEFAULT
+                allowFileAccess = false
+                allowContentAccess = false
+                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                blockNetworkImage = true
+            }
+            configuredView = loader
+        } else if (loader.settings.userAgentString != userAgent) {
+            loader.settings.userAgentString = userAgent
         }
         val request = ++requestSerial
         activeRequest = request
@@ -91,7 +100,6 @@ class BrowserScriptLoader(
         }
         timeout = Runnable { finish(Result.failure(IllegalStateException("脚本请求超时，请检查网络后重试"))) }
             .also { handler.postDelayed(it, 30_000) }
-        val fetchCode = context.assets.open("fetch-script.js").bufferedReader().use { it.readText() }
         val quotedUrl = JSONObject.quote(url).replace("<", "\\u003c")
         val html = "<!doctype html><html><head><meta charset=\"utf-8\"></head><body>" +
             "<script>const scriptUrl=$quotedUrl;const assetMode=${JSONObject.quote(mode)};\n$fetchCode</script></body></html>"
@@ -114,6 +122,7 @@ class BrowserScriptLoader(
         cancel()
         view?.let { loader ->
             view = null
+            configuredView = null
             runCatching { WebViewCompat.removeWebMessageListener(loader, "LightboatLoader") }
             container.removeView(loader)
             loader.stopLoading()

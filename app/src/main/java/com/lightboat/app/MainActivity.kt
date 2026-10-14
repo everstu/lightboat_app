@@ -64,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scriptLoader: BrowserScriptLoader
     private var config = AppConfig.EMPTY
     private var webView: AppWebView? = null
+    private var configuredWebView: AppWebView? = null
     private val scriptHandlers = mutableListOf<ScriptHandler>()
     private val worker = Executors.newFixedThreadPool(2)
     private var generation = 0
@@ -83,6 +84,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var profileAdapter: ProfileAdapter
     private lateinit var profileDrag: ItemTouchHelper
     private var profileOrderDirty = false
+    private var settingsInfoInitialized = false
+    private val nativeGuardScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("native-guard.js") }
+    private val clipboardSupportScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("clipboard-support.js") }
 
     private enum class Screen { PROFILES, EDITOR, LOADING, BROWSER, ERROR }
     private enum class ScanTarget { WEBSITE, SCRIPT, COPY }
@@ -119,16 +123,23 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         fullscreenPlayer = FullscreenPlayer(this, binding.root) { updateChrome() }
-        setupProfileList()
-        showAppVersion()
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime())
+            val left: Int
+            val top: Int
+            val right: Int
+            val bottom: Int
             if (screen == Screen.BROWSER) {
                 // The webpage fills the physical screen, including the cutout area.
-                view.setPadding(0, 0, 0, keyboard.bottom)
+                left = 0; top = 0; right = 0; bottom = keyboard.bottom
             } else {
-                view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, keyboard.bottom))
+                left = bars.left; top = bars.top; right = bars.right
+                bottom = maxOf(bars.bottom, keyboard.bottom)
+            }
+            if (view.paddingLeft != left || view.paddingTop != top ||
+                view.paddingRight != right || view.paddingBottom != bottom) {
+                view.setPadding(left, top, right, bottom)
             }
             // Only interactive native controls avoid the notch; do not inset the WebView.
             val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
@@ -140,8 +151,8 @@ class MainActivity : AppCompatActivity() {
             }
             insets
         }
-        store = ConfigStore(this)
         defaultUserAgent = MobileUserAgent.default(this)
+        store = ConfigStore(this, defaultUserAgent)
         scriptLoader = BrowserScriptLoader(this, binding.webContainer)
         binding.edgeMenuButton.setOnClickListener { showBrowserMenu() }
         binding.scanWebsiteButton.setOnClickListener { startScan(ScanTarget.WEBSITE) }
@@ -398,6 +409,7 @@ class MainActivity : AppCompatActivity() {
     private fun showProfiles() {
         cancelDownload()
         scriptLoader.close()
+        ensureSettingsUi()
         hideKeyboard()
         showScreen(Screen.PROFILES)
         binding.emptyProfiles.visibility = if (config.profiles.isEmpty()) View.VISIBLE else View.GONE
@@ -413,6 +425,7 @@ class MainActivity : AppCompatActivity() {
             profileDrag.startDrag(holder)
         }
         binding.profilesList.layoutManager = LinearLayoutManager(this)
+        binding.profilesList.setHasFixedSize(true)
         binding.profilesList.adapter = profileAdapter
         profileDrag = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
             override fun onMove(list: RecyclerView, from: RecyclerView.ViewHolder, to: RecyclerView.ViewHolder): Boolean {
@@ -434,6 +447,14 @@ class MainActivity : AppCompatActivity() {
             }
         })
         profileDrag.attachToRecyclerView(binding.profilesList)
+    }
+
+    private fun ensureSettingsUi() {
+        if (!::profileAdapter.isInitialized) setupProfileList()
+        if (!settingsInfoInitialized) {
+            settingsInfoInitialized = true
+            showAppVersion()
+        }
     }
 
     private fun commitProfileOrder() {
@@ -529,8 +550,7 @@ class MainActivity : AppCompatActivity() {
                                     prepared.fold(onSuccess = { bundle ->
                                         scriptLoader.close()
                                         try {
-                                            val guard = assets.open("native-guard.js").bufferedReader().use { it.readText() }
-                                            createWebView(profile, guard, bundle, navigationRequest)
+                                            createWebView(profile, nativeGuardScript, bundle, navigationRequest)
                                         } catch (error: Exception) {
                                             destroyWebView()
                                             showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
@@ -564,7 +584,6 @@ class MainActivity : AppCompatActivity() {
             webView = it
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
-        prepareMainWebView(profile.userAgent)
         fun isCurrentNavigation() = view === webView && navigationRequest == navigationGeneration
         view.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
@@ -581,8 +600,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onProgressChanged(view: WebView, progress: Int) {
                 if (!isCurrentNavigation() || pageFailed) return
-                binding.pageProgress.progress = progress
-                binding.pageProgress.visibility = if (progress < 100) View.VISIBLE else View.GONE
+                updatePageProgress(progress, progress < 100)
             }
         }
         view.webViewClient = object : WebViewClient() {
@@ -599,7 +617,7 @@ class MainActivity : AppCompatActivity() {
                 fullscreenPlayer.hide()
                 (view as AppWebView).clearClipboardGesture()
                 pageFailed = false
-                binding.pageProgress.visibility = View.VISIBLE
+                updatePageProgress(0, true)
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
@@ -614,7 +632,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String?) {
                 if (!isCurrentNavigation() || pageFailed) return
                 revealPage(view)
-                binding.pageProgress.visibility = View.GONE
+                updatePageProgress(100, false)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -661,9 +679,8 @@ class MainActivity : AppCompatActivity() {
             } catch (error: Exception) { response.put("error", error.message ?: "无法复制") }
             reply.postMessage(response.toString())
         }
-        val clipboardSupport = assets.open("clipboard-support.js").bufferedReader().use { it.readText() }
         scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, guard, setOf("*"))
-        scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupport, setOf("*"))
+        scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, clipboardSupportScript, setOf("*"))
         userScriptHost = UserScriptHost(this, view, profile, bundle)
         scriptHandlers += userScriptHost!!.install()
         showLoading(R.string.loading_page)
@@ -677,30 +694,43 @@ class MainActivity : AppCompatActivity() {
             webView = it
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
-        view.settings.apply {
-            userAgentString = userAgent
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            cacheMode = WebSettings.LOAD_DEFAULT
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            builtInZoomControls = false
-            displayZoomControls = false
-            setSupportZoom(false)
-            setSupportMultipleWindows(false)
-            javaScriptCanOpenWindowsAutomatically = false
-            allowFileAccess = false
-            allowContentAccess = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            // The site controls its playlist; don't require another tap for every next item.
-            mediaPlaybackRequiresUserGesture = false
-        }
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            // Embedded players commonly need their own session/progress cookie.
-            setAcceptThirdPartyCookies(view, true)
+        if (configuredWebView !== view) {
+            view.settings.apply {
+                userAgentString = userAgent
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                cacheMode = WebSettings.LOAD_DEFAULT
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                builtInZoomControls = false
+                displayZoomControls = false
+                setSupportZoom(false)
+                setSupportMultipleWindows(false)
+                javaScriptCanOpenWindowsAutomatically = false
+                allowFileAccess = false
+                allowContentAccess = false
+                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                // The site controls its playlist; don't require another tap for every next item.
+                mediaPlaybackRequiresUserGesture = false
+            }
+            CookieManager.getInstance().apply {
+                setAcceptCookie(true)
+                // Embedded players commonly need their own session/progress cookie.
+                setAcceptThirdPartyCookies(view, true)
+            }
+            configuredWebView = view
+        } else if (view.settings.userAgentString != userAgent) {
+            view.settings.userAgentString = userAgent
         }
     }
+
+    private fun updatePageProgress(progress: Int, visible: Boolean) {
+        if (binding.pageProgress.progress != progress) binding.pageProgress.progress = progress
+        val target = if (visible) View.VISIBLE else View.GONE
+        if (binding.pageProgress.visibility != target) binding.pageProgress.visibility = target
+    }
+
+    private fun readAssetText(name: String) = assets.open(name).bufferedReader().use { it.readText() }
 
     private fun prepareWebViewForProfile(profile: Profile) {
         fullscreenPlayer.hide()
@@ -759,7 +789,7 @@ class MainActivity : AppCompatActivity() {
         binding.statusSpinner.visibility = View.GONE
         binding.retryButton.visibility = View.VISIBLE
         binding.editButton.visibility = View.VISIBLE
-        binding.pageProgress.visibility = View.GONE
+        updatePageProgress(binding.pageProgress.progress, false)
     }
 
     private fun importConfig(uri: Uri) {
@@ -827,6 +857,7 @@ class MainActivity : AppCompatActivity() {
             view.destroy()
         }
         webView = null
+        configuredWebView = null
         pageReady = false
         pageFailed = false
         resetHistoryOnCommit = false
