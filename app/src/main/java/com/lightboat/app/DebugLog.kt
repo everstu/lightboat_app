@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Process
 import java.io.File
 import java.io.PrintWriter
+import java.io.RandomAccessFile
 import java.io.StringWriter
 import java.net.URI
 import java.text.SimpleDateFormat
@@ -22,6 +23,10 @@ object DebugLog {
     private val clock = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private var file: File? = null
     private var initialized = false
+    private var generation = 0L
+
+    internal data class Cursor(val generation: Long, val offset: Long)
+    internal data class Update(val cursor: Cursor, val reset: Boolean, val text: String)
 
     fun initialize(context: Context) {
         val app = context.applicationContext
@@ -65,15 +70,36 @@ object DebugLog {
                 if (target.length() > MAX_BYTES) {
                     val current = target.readBytes()
                     val tail = current.copyOfRange((current.size - KEEP_BYTES).coerceAtLeast(0), current.size)
-                    target.writeBytes("--- log trimmed ---\n".toByteArray(Charsets.UTF_8) + tail)
+                    val firstLineEnd = tail.indexOf('\n'.code.toByte())
+                    val completeLines = if (firstLineEnd >= 0) tail.copyOfRange(firstLineEnd + 1, tail.size) else tail
+                    target.writeBytes("--- log trimmed ---\n".toByteArray(Charsets.UTF_8) + completeLines)
+                    generation++
                 }
                 target.appendText(line, Charsets.UTF_8)
             }
         }
     }
 
-    fun read(): String = synchronized(lock) {
-        file?.takeIf { it.exists() }?.readText(Charsets.UTF_8).orEmpty()
+    internal fun readAfter(cursor: Cursor?): Update = synchronized(lock) {
+        val target = file?.takeIf { it.exists() }
+        val size = target?.length() ?: 0L
+        val reset = cursor == null || cursor.generation != generation || cursor.offset > size
+        val offset = if (reset) 0L else cursor!!.offset
+        val text = if (target != null && size > offset) {
+            RandomAccessFile(target, "r").use { input ->
+                input.seek(offset)
+                val bytes = ByteArray((size - offset).toInt())
+                input.readFully(bytes)
+                bytes.toString(Charsets.UTF_8)
+            }
+        } else ""
+        Update(Cursor(generation, size), reset, text)
+    }
+
+    internal fun clear(): Unit = synchronized(lock) {
+        file?.writeText("", Charsets.UTF_8)
+        generation++
+        Unit
     }
 
     fun safeUrl(value: String?): String {

@@ -7,4 +7,7 @@
     <color name="white">#FFFFFF</color>
     <color name="line">#DAE1D7</color>
     <color name="error">#AC3535</color>
+    <color name="log_badge">#E3EFE7</color>
+    <color name="log_warning">#966217</color>
+    <color name="log_paused_badge">#F8EDD8</color>
 </resources>

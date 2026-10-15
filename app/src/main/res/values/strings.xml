@@ -89,5 +89,23 @@
     <string name="script_commands">脚本命令</string>
     <string name="script_logs">脚本日志</string>
     <string name="debug_logs">调试日志</string>
+    <string name="logs_description">本次运行的脚本、网页与媒体记录</string>
+    <string name="logs_live">实时更新</string>
+    <string name="logs_paused">已暂停刷新</string>
+    <string name="logs_pause">暂停刷新</string>
+    <string name="logs_resume">继续刷新</string>
+    <string name="logs_clear">清除日志</string>
+    <string name="logs_copy">复制日志</string>
+    <string name="logs_copied">已复制当前展示的日志</string>
+    <string name="logs_count">%1$d 条日志</string>
+    <string name="logs_following">自动跟随最新日志</string>
+    <string name="logs_reading_history">正在浏览历史 · 滚动到底部恢复跟随</string>
+    <string name="logs_paused_hint">日志仍在记录，继续刷新后同步</string>
+    <string name="logs_latest">回到最新 ↓</string>
+    <string name="logs_loading">正在读取日志…</string>
+    <string name="logs_empty">暂无日志</string>
+    <string name="logs_empty_hint">新的运行记录会显示在这里</string>
+    <string name="logs_read_failed">暂时无法读取日志，稍后自动重试</string>
+    <string name="logs_clear_failed">清除日志失败，请重试</string>
     <string name="drag_profile">长按拖动配置排序</string>
 </resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp"
+    android:background="@drawable/bg_log_entry" android:padding="12dp" android:orientation="vertical">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <View android:id="@+id/entryMarker" android:layout_width="3dp" android:layout_height="12dp"
+            android:layout_marginEnd="8dp" android:background="@color/accent" />
+        <TextView android:id="@+id/entrySource" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:fontFamily="sans-serif-medium" android:textSize="12sp"
+            android:textColor="@color/accent" android:maxLines="1" android:ellipsize="end" />
+        <TextView android:id="@+id/entryTime" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="8dp" android:fontFamily="monospace" android:textSize="11sp" android:textColor="@color/muted" />
+    </LinearLayout>
+    <TextView android:id="@+id/entryMessage" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:fontFamily="monospace" android:textSize="12sp" android:textColor="@color/ink"
+        android:lineSpacingExtra="3dp" android:textIsSelectable="true" />
+</LinearLayout>

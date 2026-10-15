@@ -331,20 +331,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showScriptLogs() {
-        val logView = android.widget.TextView(this).apply {
-            text = DebugLog.read().ifBlank { "暂无应用调试日志" }
-            setTextIsSelectable(true)
-            setPadding(24, 16, 24, 16)
-            textSize = 12f
-        }
-        val scroll = android.widget.ScrollView(this).apply { addView(logView) }
-        val text = logView.text.toString()
-        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.debug_logs).setView(scroll)
-            .setPositiveButton(R.string.copy) { _, _ ->
-                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
-                    .setPrimaryClip(ClipData.newPlainText(getString(R.string.debug_logs), text))
-                if (Build.VERSION.SDK_INT < 33) toast(getString(R.string.copied))
-            }.setNegativeButton(R.string.close, null).create())
+        showNativeDialog(DebugLogDialog(this))
     }
 
     private fun showScriptCommands() {

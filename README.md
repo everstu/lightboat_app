@@ -117,6 +117,8 @@ if (document.readyState === 'loading') {
 
 悬浮菜单中的 **调试日志** 查看本次应用进程的单个 `debug.log` 文件。应用进程首次启动时清空旧日志，之后记录配置切换、脚本准备、用户脚本 GM 请求、页面导航、原生请求观察、WebView HTTP/网络错误及媒体元素错误。媒体代理额外记录播放器 UA、上游配置 UA、Cookie 是否存在、HTTP 状态、Content-Type、长度、Range 和正文类别（HLS、MP4、MPEG-TS、HTML、JSON 或未知二进制），不记录正文或密钥字节。合法加密分片可能属于未知二进制，类别日志不等于编码或解密结论；200 也不证明内容一定是预期视频。观察回调不能获取所有 Chromium 成功响应的状态。若上次进程因未捕获异常退出，新日志会在清空后写入一次上次崩溃摘要。Cookie、Authorization 和完整查询参数值均不保存；文件超过 1 MiB 时保留末尾约 512 KiB。日志位于应用私有目录，卸载应用时一并删除。
 
+调试日志采用全屏分条列表，分开展示时间、来源和正文，并突出错误。默认每 500 毫秒增量刷新；可暂停/继续刷新，暂停时后台仍记录，继续后补齐。列表位于底部时自动跟随新日志；向上拖动后保留阅读位置，滚回底部或点击 **回到最新** 恢复跟随。**清除日志** 清空当前文件和列表，之后继续记录；**复制全部** 复制当前展示的原始日志。关闭日志窗口或应用进入后台后停止界面刷新。
+
 WebView 运行器不是浏览器扩展，完整接口、边界和未实现能力见 [用户脚本兼容表](docs/userscript-compatibility.md)。尤其不能把原生跨域接口视为任意网页权限；只向声明 grant/connect 的可信脚本开放，不具备油猴扩展的安全隔离世界。
 
 ## 浏览体验与范围
@@ -164,5 +166,6 @@ Android 编译、Lint、Kotlin 测试由 GitHub Actions 执行。真机验收重
 12. 油猴脚本无 run-at 时等 DOM 就绪；match/exclude/noframes 正常，require/resource 准备正确，GM 存储重启后保留，命令和日志可查看。
 13. 长按拖动配置排序并自动滚动，重启/导出后顺序保留，启动项不变；右下角新增按钮不随列表滚走，也不会挡住最后一项操作。
 14. 以同设备、同网络、同配置对照 `v1.0.0` 检查原生视频、HLS/MSE 和音频；跨域 iframe 播放器保持会话。打开配置页再返回，播放位置和网页布局不重建；切到后台后媒体暂停，返回后可继续。
+15. 调试日志持续增加时，底部跟随最新内容；向上翻阅时不跳动，回到底部后重新跟随。暂停后内容保持不变，继续时补齐；清除后旧读取结果不会补回，新增日志正常出现。关闭/后台后停止刷新，复制保留原始日志文本。
 
 参考：[提前注入接口](https://developer.android.com/reference/androidx/webkit/WebViewCompat#addDocumentStartJavaScript(android.webkit.WebView,java.lang.String,java.util.Set%3Cjava.lang.String%3E)) · [WebView HTTP(S) base URL](https://developer.android.com/reference/android/webkit/WebView#loadDataWithBaseURL(java.lang.String,java.lang.String,java.lang.String,java.lang.String,java.lang.String))。
