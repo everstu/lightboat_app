@@ -255,6 +255,7 @@ class MainActivity : AppCompatActivity() {
             showEditor(config.profiles.firstOrNull { it.id == savedInstanceState.getString("editingId") })
             binding.nameInput.setText(savedInstanceState.getString("draftName"))
             binding.categoryInput.setText(savedInstanceState.getString("draftCategory").orEmpty())
+            binding.favoriteInput.isChecked = savedInstanceState.getBoolean("draftFavorite", binding.favoriteInput.isChecked)
             binding.websiteInput.setText(savedInstanceState.getString("draftUrl"))
             binding.scriptInput.setText(savedInstanceState.getString("draftScript"))
             binding.userAgentInput.setText(savedInstanceState.getString("draftUserAgent", defaultUserAgent))
@@ -507,9 +508,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupProfileList() {
-        profileAdapter = ProfileAdapter(::openProfile, ::showEditor, ::confirmDeleteProfile, ::toggleProfileFavorite, ::moveProfileToTop) { holder ->
-            profileDrag.startDrag(holder)
-        }
+        profileAdapter = ProfileAdapter(::openProfile, ::showEditor, ::confirmDeleteProfile, ::toggleProfileFavorite, ::moveProfileToTop)
         binding.profilesList.layoutManager = LinearLayoutManager(this)
         binding.profilesList.setHasFixedSize(true)
         binding.profilesList.adapter = profileAdapter
@@ -595,6 +594,7 @@ class MainActivity : AppCompatActivity() {
         val categoryId = profile?.categoryId ?: if (profile == null) profileFilter.categoryId else null
         binding.categoryInput.setText(config.categories[categoryId].orEmpty())
         binding.categoryInput.error = null
+        binding.favoriteInput.isChecked = profile?.favorite ?: false
         binding.websiteInput.setText(profile?.url.orEmpty())
         binding.scriptInput.setText(profile?.scriptUrl.orEmpty())
         binding.userAgentInput.setText(profile?.userAgent ?: defaultUserAgent)
@@ -651,7 +651,7 @@ class MainActivity : AppCompatActivity() {
         }
         val previous = config.profiles.firstOrNull { it.id == editingId }
         val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent, editingPlatform,
-            previous?.categoryId, previous?.favorite ?: false)
+            previous?.categoryId, binding.favoriteInput.isChecked)
         val next = try {
             config.upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
         } catch (error: Exception) {
@@ -1136,6 +1136,7 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("profileFavoriteFilter", profileFilter.favoritesOnly)
         outState.putString("draftName", binding.nameInput.text.toString())
         outState.putString("draftCategory", binding.categoryInput.text.toString())
+        outState.putBoolean("draftFavorite", binding.favoriteInput.isChecked)
         outState.putString("draftUrl", binding.websiteInput.text.toString())
         outState.putString("draftScript", binding.scriptInput.text.toString())
         outState.putString("draftUserAgent", binding.userAgentInput.text.toString())

@@ -13,8 +13,7 @@ class ProfileAdapter(
     private val edit: (Profile) -> Unit,
     private val delete: (Profile) -> Unit,
     private val favorite: (Profile) -> Unit,
-    private val moveToTop: (Profile) -> Unit,
-    private val startDrag: (RecyclerView.ViewHolder) -> Unit
+    private val moveToTop: (Profile) -> Unit
 ) : RecyclerView.Adapter<ProfileAdapter.Holder>() {
     class Holder(val binding: ItemProfileBinding) : RecyclerView.ViewHolder(binding.root)
     private val profiles = mutableListOf<Profile>()
@@ -49,13 +48,16 @@ class ProfileAdapter(
         val row = holder.binding
         val context = row.root.context
         row.profileName.text = profile.name
-        row.profileCategory.text = context.getString(R.string.profile_category,
-            categories[profile.categoryId] ?: context.getString(R.string.category_none))
+        val category = categories[profile.categoryId] ?: context.getString(R.string.category_none)
+        row.profileCategory.text = category
+        row.profileCategory.contentDescription = context.getString(R.string.profile_category, category)
+        row.profileCategory.tooltipText = category
         row.favoriteProfile.setImageResource(if (profile.favorite) R.drawable.ic_star else R.drawable.ic_star_outline)
         row.favoriteProfile.contentDescription = context.getString(
             if (profile.favorite) R.string.profile_unfavorite_description else R.string.profile_favorite_description, profile.name)
         row.favoriteProfile.setOnClickListener { favorite(profile) }
         row.topProfile.contentDescription = context.getString(R.string.profile_top_description, profile.name)
+        row.topProfile.tooltipText = context.getString(R.string.profile_move_top)
         row.topProfile.setOnClickListener { moveToTop(profile) }
         row.root.isActivated = profile.id == currentId
         row.profileUrl.text = profile.url.substringBefore('?').substringBefore('#')
@@ -81,12 +83,6 @@ class ProfileAdapter(
             PopupMenu(context, row.profileMore).apply {
                 menu.add(R.string.delete).setOnMenuItemClickListener { delete(profile); true }
             }.show()
-        }
-        row.dragHandle.setOnLongClickListener {
-            if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION && profiles.size > 1) {
-                startDrag(holder)
-                true
-            } else false
         }
     }
 }

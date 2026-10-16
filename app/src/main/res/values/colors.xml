@@ -12,4 +12,6 @@
     <color name="log_paused_badge">#F8EDD8</color>
     <color name="config_soft">#E8EFE8</color>
     <color name="config_selected">#EEF5EF</color>
+    <color name="category_badge_fill">#EDF0FA</color>
+    <color name="category_badge_ink">#4D6090</color>
 </resources>

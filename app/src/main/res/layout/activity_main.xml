@@ -37,6 +37,11 @@
                 <TextView android:id="@+id/configTitle" android:layout_width="0dp" android:layout_weight="1"
                     android:layout_height="wrap_content" android:layout_marginStart="8dp"
                     android:text="@string/setup_title" android:textSize="22sp" android:textStyle="bold" android:textColor="@color/ink" />
+                <androidx.appcompat.widget.AppCompatCheckBox android:id="@+id/favoriteInput"
+                    android:layout_width="48dp" android:layout_height="48dp" android:minWidth="0dp"
+                    android:padding="14dp" android:gravity="center" android:button="@drawable/ic_favorite_check"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/profile_favorite" />
             </LinearLayout>
             <ScrollView android:id="@+id/editorScroll" android:layout_width="match_parent" android:layout_height="0dp"
                 android:layout_weight="1" android:fillViewport="true" android:clipToPadding="false">
