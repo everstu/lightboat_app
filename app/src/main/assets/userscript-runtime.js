@@ -11,6 +11,7 @@ function LightboatRuntime(spec, entry) {
   const valueWrites = new Map();
   const valueListeners = new Map();
   const menus = new Map();
+  let suspended = false, reconnecting = false, executed = false, scheduled = false;
   const unavailableResourceWarnings = new Set();
   let sequence = 0;
   const grants = new Set(meta.grant || []);
@@ -213,8 +214,9 @@ function LightboatRuntime(spec, entry) {
   };
   const registerMenu = (title, callback, options) => {
     const menuId = String(typeof options === 'object' && options?.id != null ? options.id : ++sequence);
-    menus.set(menuId, { callback });
-    sendDetached('menuRegister', { menuId, title: String(title) });
+    const menuTitle = String(title);
+    menus.set(menuId, { callback, title: menuTitle });
+    sendDetached('menuRegister', { menuId, title: menuTitle });
     return menuId;
   };
   const unregisterMenu = id => { menus.delete(String(id)); sendDetached('menuRemove', { menuId: String(id) }); };
@@ -357,10 +359,15 @@ function LightboatRuntime(spec, entry) {
     return (window === window.top ? '主页面' : 'iframe') + '；' + page;
   })();
   const run = () => {
+    scheduled = false;
+    if (suspended || executed) return;
+    executed = true;
     try { entry.apply(window, args); report('info', meta.name + ' 已执行（' + meta.runAt + '；' + executionContext + '）'); }
     catch (error) { report('error', errorText(error)); }
   };
   const schedule = () => {
+    if (suspended || scheduled || executed) return;
+    scheduled = true;
     if (meta.runAt === 'document-start') run();
     else if (meta.runAt === 'document-body') {
       if (document.body) run();
@@ -383,15 +390,29 @@ function LightboatRuntime(spec, entry) {
     }
   });
   window.addEventListener('pagehide', () => {
+    suspended = true;
     for (const transfer of incoming.values()) clearTimeout(transfer.timer);
     incoming.clear();
     for (const request of pending.values()) { clearTimeout(request.timer); request.chunks = null; request.reject(new Error('脚本文档已关闭')); }
     pending.clear();
     try { post({ op: 'dispose' }); } catch (_) {}
   });
+  window.addEventListener('pageshow', event => {
+    if (!event.persisted || !suspended || reconnecting) return;
+    reconnecting = true;
+    // A restored document retains its JS hooks and callbacks. Reconnect its native
+    // session and menu registrations without executing the userscript a second time.
+    for (const key of Object.keys(values)) delete values[key];
+    rpc('hello').promise.then(snapshot => {
+      Object.assign(values, snapshot);
+      for (const [menuId, menu] of menus) sendDetached('menuRegister', { menuId, title: menu.title });
+      suspended = false;
+      schedule();
+    }).catch(error => report('error', errorText(error))).finally(() => { reconnecting = false; });
+  });
   const hello = rpc('hello').promise;
   report('info', meta.name + ' 已匹配（' + executionContext + '）；等待 ' + meta.runAt);
   if ([...grants].some(grant => /(?:Value|Values)/.test(grant))) {
-    hello.then(snapshot => { Object.assign(values, snapshot); schedule(); }).catch(error => report('error', errorText(error)));
+    hello.then(snapshot => { Object.assign(values, snapshot); schedule(); }).catch(error => { if (!suspended) report('error', errorText(error)); });
   } else { hello.catch(error => report('error', errorText(error))); schedule(); }
 }

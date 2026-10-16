@@ -263,6 +263,50 @@ test('Resource APIs return preloaded text/data and menus invoke correct callback
   assert.ok(h.messages.some(msg => msg.op === 'menuRemove'));
 });
 
+test('Restored documents reconnect storage and menu callbacks without rerunning the script', async () => {
+  const snapshot = { current: { type: 'json', value: 'first' }, removed: { type: 'json', value: true } };
+  const h = harness({ runAt: 'document-start', grant: ['GM_getValue', 'GM_registerMenuCommand'] },
+    { values: snapshot });
+  h.run(`window.runs=(window.runs||0)+1; window.read=()=>GM_getValue('current');
+    window.removed=()=>GM_getValue('removed','gone');
+    window.menu=GM_registerMenuCommand('Inspect',()=>window.clicked=true);`);
+  await flush();
+  assert.equal(h.context.window.runs, 1);
+  h.listeners['window:pagehide']({ persisted: true });
+  snapshot.current = { type: 'json', value: 'second' };
+  delete snapshot.removed;
+  h.listeners['window:pageshow']({ persisted: true });
+  h.listeners['window:pageshow']({ persisted: true });
+  await flush();
+  assert.equal(h.messages.filter(msg => msg.op === 'hello').length, 2);
+  const registrations = h.messages.filter(msg => msg.op === 'menuRegister');
+  assert.equal(registrations.length, 2);
+  assert.equal(registrations[1].title, 'Inspect');
+  assert.equal(registrations[1].menuId, registrations[0].menuId);
+  assert.equal(h.context.window.read(), 'second');
+  assert.equal(h.context.window.removed(), 'gone');
+  assert.equal(h.context.window.runs, 1);
+  h.reply({ event: 'menu', menuId: h.context.window.menu });
+  assert.equal(h.context.window.clicked, true);
+});
+
+test('A document suspended during its initial snapshot executes once after restoration', async () => {
+  const h = harness({ runAt: 'document-start', grant: ['GM_getValue', 'GM_registerMenuCommand'] },
+    { streamSnapshot: true });
+  h.run(`window.runs=(window.runs||0)+1; window.cached=GM_getValue('cache');
+    GM_registerMenuCommand('Inspect',()=>{});`);
+  h.listeners['window:pagehide']({ persisted: true });
+  await flush();
+  h.listeners['window:pageshow']({ persisted: true });
+  const hello = h.messages.filter(msg => msg.op === 'hello').at(-1);
+  deliverChunked(h, { event: 'snapshotValue', key: 'cache', value: { type: 'json', value: 'restored' } });
+  h.reply({ id: hello.id, result: {} });
+  await flush();
+  assert.equal(h.context.window.runs, 1);
+  assert.equal(h.context.window.cached, 'restored');
+  assert.equal(h.messages.filter(msg => msg.op === 'menuRegister').length, 1);
+});
+
 test('Unavailable named resources return an empty value and warn without stopping page execution', () => {
   const h = harness({ runAt: 'document-start', grant: ['GM_getResourceText'] });
   h.spec.resources.style = { text: '', base64: '', mime: 'application/octet-stream', error: 'HTTP 418' };

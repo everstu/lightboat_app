@@ -64,9 +64,13 @@ class UserScriptHost(
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = linkedMapOf<String, Session>()
     private val commands = linkedMapOf<String, Menu>()
+    private val commandListeners = linkedSetOf<() -> Unit>()
     private val logs = ArrayDeque<String>()
     private var alive = true
     val menus get() = commands.values.toList()
+    fun addCommandListener(listener: () -> Unit) { commandListeners.add(listener) }
+    fun removeCommandListener(listener: () -> Unit) { commandListeners.remove(listener) }
+    private fun commandsChanged() { commandListeners.toList().forEach { it() } }
     fun logText() = logs.joinToString("\n").ifEmpty { "暂无脚本日志" }
 
     fun log(level: String, text: String) {
@@ -132,6 +136,9 @@ class UserScriptHost(
             }
             try {
                 if (op == "hello") {
+                    // Document callbacks and frame messages have independent timing.
+                    // A handshake may replace only the same document's session.
+                    if (sessions.containsKey(doc)) dispose(doc)
                     require(sessions.size < 100) { "脚本 frame 数量超过上限" }
                     val session = Session(address, reply, ScriptMessageTransport(doc, reply, handler))
                     sessions[doc] = session
@@ -227,9 +234,10 @@ class UserScriptHost(
                         require(commands.size < 100) { "脚本菜单数量超过上限" }
                         val menuId = payload.getString("menuId").take(100)
                         commands["$doc:$menuId"] = Menu(doc, menuId, payload.getString("title").take(100))
+                        commandsChanged()
                         respond()
                     }
-                    "menuRemove" -> { commands.remove("$doc:${payload.getString("menuId")}"); respond() }
+                    "menuRemove" -> { commands.remove("$doc:${payload.getString("menuId")}"); commandsChanged(); respond() }
                     "clipboard" -> {
                         check(view.isShown && activity.hasWindowFocus() && view.consumeClipboardGesture()) { "复制需要用户点击操作" }
                         val text = payload.getString("text")
@@ -277,13 +285,14 @@ class UserScriptHost(
             session.transport.close()
             ScriptStorage.worker.execute { session.upload?.close(); session.upload = null }
         }
-        commands.keys.filter { it.startsWith("$doc:") }.forEach { commands.remove(it) }
+        val removed = commands.keys.removeAll { it.startsWith("$doc:") }
+        if (removed) commandsChanged()
         network.abortDocument(doc)
     }
 
     fun resetDocuments() { sessions.keys.toList().forEach { dispose(it) } }
 
-    fun close() { alive = false; network.close(); sessions.keys.toList().forEach(::dispose); commands.clear(); handler.removeCallbacksAndMessages(null) }
+    fun close() { alive = false; network.close(); sessions.keys.toList().forEach(::dispose); commands.clear(); commandsChanged(); commandListeners.clear(); handler.removeCallbacksAndMessages(null) }
 
     private fun sameOrigin(uri: URI, origin: Uri): Boolean {
         val uriPort = if (uri.port >= 0) uri.port else if (uri.scheme == "https") 443 else 80

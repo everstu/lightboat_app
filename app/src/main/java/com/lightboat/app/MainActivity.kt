@@ -356,7 +356,22 @@ class MainActivity : AppCompatActivity() {
         if (screen != Screen.BROWSER) return
         binding.edgeMenuButton.wake()
         val menu = DialogBrowserMenuBinding.inflate(layoutInflater)
+        val commandHost = userScriptHost
+        val updateCommands: () -> Unit = {
+            menu.menuScriptCommands.isEnabled = userScriptHost === commandHost && commandHost?.menus?.isNotEmpty() == true
+            menu.menuScriptCommands.alpha = if (menu.menuScriptCommands.isEnabled) 1f else 0.45f
+        }
         val dialog = object : Dialog(this), ResponsiveDialog {
+            override fun onStart() {
+                super.onStart()
+                commandHost?.addCommandListener(updateCommands)
+                updateCommands()
+            }
+
+            override fun onStop() {
+                commandHost?.removeCommandListener(updateCommands)
+                super.onStop()
+            }
             override fun updateLayout() {
                 window?.apply {
                     setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
@@ -381,8 +396,7 @@ class MainActivity : AppCompatActivity() {
         menu.menuRefresh.setOnClickListener { dialog.dismiss(); currentProfile()?.let { openProfile(it) } }
         menu.menuSettings.setOnClickListener { dialog.dismiss(); showProfiles() }
         menu.menuScriptLogs.setOnClickListener { dialog.dismiss(); showScriptLogs() }
-        menu.menuScriptCommands.isEnabled = userScriptHost?.menus?.isNotEmpty() == true
-        menu.menuScriptCommands.alpha = if (menu.menuScriptCommands.isEnabled) 1f else 0.45f
+        updateCommands()
         menu.menuScriptCommands.setOnClickListener { dialog.dismiss(); showScriptCommands() }
         menu.menuClose.setOnClickListener { dialog.dismiss() }
         dialog.setCanceledOnTouchOutside(true)
@@ -872,7 +886,9 @@ class MainActivity : AppCompatActivity() {
                 if (!isCurrentNavigation()) return
                 DebugLog.event("page", "started ${DebugLog.safeUrl(url)}")
                 if (url != null) mainFrameUrl = url
-                userScriptHost?.resetDocuments()
+                // Document-start bridge messages can arrive before this callback.
+                // Each document disposes only its own session on pagehide; a late
+                // navigation callback must never clear a newer document's handshake.
                 fullscreenPlayer.hide()
                 (view as AppWebView).clearClipboardGesture()
                 pageFailed = false
