@@ -99,6 +99,7 @@ class MainActivity : AppCompatActivity() {
     private var profileOrderDirty = false
     private var profileFilter = ProfileFilter()
     private var profileOrderFilter = ProfileFilter()
+    private val profileUiPreferences by lazy(LazyThreadSafetyMode.NONE) { getSharedPreferences("profile_ui", MODE_PRIVATE) }
     private var settingsInfoInitialized = false
     private val nativeGuardScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("native-guard.js") }
     private val clipboardSupportScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("clipboard-support.js") }
@@ -243,8 +244,11 @@ class MainActivity : AppCompatActivity() {
             toast(getString(R.string.config_read_error))
             AppConfig.EMPTY
         }
-        profileFilter = ProfileFilter(savedInstanceState?.getString("profileCategoryFilter"),
+        val categoryId = if (savedInstanceState?.containsKey("profileCategoryFilter") == true)
+            savedInstanceState.getString("profileCategoryFilter") else profileUiPreferences.getString("categoryId", null)
+        profileFilter = ProfileFilter(categoryId,
             savedInstanceState?.getBoolean("profileFavoriteFilter") ?: false).resolve(config)
+        rememberProfileCategory(profileFilter.categoryId)
         exportSnapshot = savedInstanceState?.getString("exportSnapshot")
         scanTarget = savedInstanceState?.getString("scanTarget")?.let { value ->
             ScanTarget.entries.firstOrNull { it.name == value }
@@ -401,7 +405,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showProfilePicker() {
         if (config.profiles.isEmpty()) { showProfiles(); return }
-        showNativeDialog(ProfileSwitchDialog(this, config, currentId, ::openProfile))
+        showNativeDialog(ProfileSwitchDialog(this, config, currentId, ::openProfile,
+            profileFilter.categoryId, ::rememberProfileCategory))
     }
 
     private fun startScan(target: ScanTarget) {
@@ -478,8 +483,16 @@ class MainActivity : AppCompatActivity() {
     private fun changeProfileFilter(next: ProfileFilter) {
         commitProfileOrder()
         profileFilter = next.resolve(config)
+        rememberProfileCategory(profileFilter.categoryId)
         renderProfiles()
         binding.profilesList.scrollToPosition(0)
+    }
+
+    private fun rememberProfileCategory(categoryId: String?) {
+        profileFilter = profileFilter.copy(categoryId = categoryId).resolve(config)
+        if (profileUiPreferences.getString("categoryId", null) != profileFilter.categoryId) {
+            profileUiPreferences.edit().putString("categoryId", profileFilter.categoryId).apply()
+        }
     }
 
     private fun renderProfiles() {
@@ -1057,7 +1070,8 @@ class MainActivity : AppCompatActivity() {
         }) { imported ->
             if (!persist(imported)) false else {
                 profileOrderDirty = false
-                profileFilter = ProfileFilter()
+                profileFilter = profileFilter.copy(favoritesOnly = false).resolve(config)
+                rememberProfileCategory(profileFilter.categoryId)
                 cancelDownload(); destroyWebView(); currentId = null
                 toast(getString(R.string.import_success, imported.profiles.size))
                 launchLast()

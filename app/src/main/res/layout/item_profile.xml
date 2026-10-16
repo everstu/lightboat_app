@@ -32,10 +32,11 @@
         android:maxLines="1" android:ellipsize="middle" />
     <TextView android:id="@+id/profileScript" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="4dp" android:textSize="12sp" android:textColor="@color/muted" android:maxLines="1" android:ellipsize="middle" />
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:gravity="center_vertical">
-        <Button android:id="@+id/openProfile" style="@style/ConfigPrimary" android:layout_width="0dp" android:layout_weight="1"
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:gravity="end|center_vertical">
+        <Button android:id="@+id/openProfile" style="@style/ProfileCardAction.Primary" android:layout_width="wrap_content"
             android:layout_height="48dp" android:text="@string/switch_profile" />
-        <Button android:id="@+id/editProfile" style="@style/ConfigAction" android:layout_width="0dp" android:layout_weight="1"
+        <Button android:id="@+id/editProfile" style="@style/ProfileCardAction.Secondary" android:layout_width="wrap_content"
             android:layout_height="48dp" android:layout_marginStart="8dp" android:text="@string/edit" />
     </LinearLayout>
 </LinearLayout>
