@@ -5,7 +5,7 @@ import android.util.Base64
 import android.webkit.CookieManager
 import com.lightboat.app.DebugLog
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
+import java.io.FilterInputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ScriptNetwork(private val meta: ScriptMetadata, private val userAgent: String) {
     private data class Request(val stopped: AtomicBoolean = AtomicBoolean(false), @Volatile var connection: HttpURLConnection? = null)
     private val requests = ConcurrentHashMap<String, Request>()
-    private val pool = Executors.newFixedThreadPool(4)
+    private val pool = Executors.newFixedThreadPool(2)
     @Volatile private var closed = false
 
     fun abort(key: String) { requests[key]?.let { it.stopped.set(true); it.connection?.disconnect() } }
@@ -98,39 +98,69 @@ class ScriptNetwork(private val meta: ScriptMetadata, private val userAgent: Str
                                 values.joinToString("\r\n") { "$name: $it" }
                             }
                             event("readystatechange", JSONObject().put("readyState", 2).put("status", status).put("responseHeaders", rawHeaders), null)
-                            val output = ByteArrayOutputStream()
+                            require(connection.contentLengthLong <= ScriptLimits.MAX_BYTES) { "GM 请求响应不能超过 10 MiB" }
                             val input = if (status >= 400) connection.errorStream else connection.inputStream
-                            var lastProgress = 0L
-                            input?.use { stream ->
-                                val buffer = ByteArray(8192)
-                                while (true) {
-                                    if (request.stopped.get()) throw IOException("请求已取消")
-                                    val left = timeout - (SystemClock.elapsedRealtime() - started)
-                                    if (left <= 0) throw SocketTimeoutException("请求超时")
-                                    connection.readTimeout = left.toInt()
-                                    val count = stream.read(buffer)
-                                    if (count == -1) break
-                                    require(output.size() + count <= 4 * 1024 * 1024) { "GM 请求响应不能超过 4 MiB" }
-                                    output.write(buffer, 0, count)
-                                    val now = SystemClock.elapsedRealtime()
-                                    if (now - lastProgress >= 150) {
-                                        event("progress", JSONObject().put("loaded", output.size()).put("total", maxOf(0, connection.contentLengthLong))
-                                            .put("lengthComputable", connection.contentLengthLong >= 0).put("readyState", 3).put("status", status), null)
-                                        lastProgress = now
-                                    }
-                                }
-                            }
-                            val bytes = output.toByteArray()
                             val contentType = connection.contentType.orEmpty()
                             val charset = Regex("charset\\s*=\\s*[\"']?([^;\\s\"']+)", RegexOption.IGNORE_CASE)
                                 .find(contentType)?.groupValues?.get(1)?.let { runCatching { charset(it) }.getOrNull() } ?: Charsets.UTF_8
                             val binary = details.optString("responseType") in setOf("arraybuffer", "blob")
+                            var lastProgress = 0L
+                            var bytes = 0
+                            var index = 0
+                            fun beforeRead() {
+                                    if (request.stopped.get()) throw IOException("请求已取消")
+                                    val left = timeout - (SystemClock.elapsedRealtime() - started)
+                                    if (left <= 0) throw SocketTimeoutException("请求超时")
+                                    connection.readTimeout = left.toInt()
+                            }
+                            fun chunk(text: String) {
+                                    event("chunk", JSONObject().put("kind", if (binary) "base64" else "text")
+                                        .put("index", index++).put("text", text), null)
+                                    val now = SystemClock.elapsedRealtime()
+                                    if (now - lastProgress >= 150) {
+                                        event("progress", JSONObject().put("loaded", bytes).put("total", maxOf(0, connection.contentLengthLong))
+                                            .put("lengthComputable", connection.contentLengthLong >= 0).put("readyState", 3).put("status", status), null)
+                                        lastProgress = now
+                                    }
+                            }
+                            input?.use { source ->
+                                val stream = object : FilterInputStream(source) {
+                                    override fun read(): Int { beforeRead(); return `in`.read().also { if (it >= 0) added(1) } }
+                                    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                                        beforeRead()
+                                        return `in`.read(buffer, offset, length).also { if (it > 0) added(it) }
+                                    }
+                                    private fun added(count: Int) {
+                                        bytes += count
+                                        require(bytes <= ScriptLimits.MAX_BYTES) { "GM 请求响应不能超过 10 MiB" }
+                                    }
+                                }
+                                if (binary) {
+                                    val buffer = ByteArray(24 * 1024)
+                                    while (true) {
+                                        val count = stream.read(buffer)
+                                        if (count < 0) break
+                                        chunk(Base64.encodeToString(buffer, 0, count, Base64.NO_WRAP))
+                                    }
+                                } else stream.reader(charset).use { reader ->
+                                    val buffer = CharArray(ScriptLimits.CHUNK_CHARS)
+                                    var carry = ""
+                                    while (true) {
+                                        val count = reader.read(buffer)
+                                        if (count < 0) break
+                                        var text = carry + String(buffer, 0, count)
+                                        carry = if (text.lastOrNull()?.isHighSurrogate() == true) text.takeLast(1) else ""
+                                        if (carry.isNotEmpty()) text = text.dropLast(1)
+                                        if (text.isNotEmpty()) chunk(text)
+                                    }
+                                    if (carry.isNotEmpty()) chunk(carry)
+                                }
+                            }
                             val result = JSONObject().put("status", status).put("statusText", connection.responseMessage.orEmpty())
                                 .put("finalUrl", current).put("responseHeaders", rawHeaders).put("mime", contentType.substringBefore(';'))
-                                .put("responseText", if (binary) "" else bytes.toString(charset))
-                            if (binary) result.put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
+                                .put("responseText", "").put("chunked", true)
                             event("load", result, null)
-                            DebugLog.event("gm-xhr", "load status=$status bytes=${bytes.size} final=${DebugLog.safeUrl(current)}")
+                            DebugLog.event("gm-xhr", "load status=$status bytes=$bytes final=${DebugLog.safeUrl(current)}")
                             return@task
                         }
                     } finally { connection.disconnect(); request.connection = null }

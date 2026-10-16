@@ -103,9 +103,28 @@ class DebugLogFilteringTest {
         waitFor("Reset did not restore all sources and levels") { count() == 3 }
     }
 
+    @Test fun pausedWindowAndFileRetainOnlyLatest2000AfterOverflow() {
+        scenario.onActivity { dialog.findViewById<Button>(R.id.pauseLogs)!!.performClick() }
+        repeat(2400) { DebugLog.event("retention", "record-$it") }
+        DebugLog.flush()
+        val disk = File(context.filesDir, "debug.log").readLines()
+        assertEquals(2000, disk.size)
+        assertTrue(disk.first().endsWith("record-400"))
+        assertTrue(disk.last().endsWith("record-2399"))
+        scenario.onActivity { dialog.findViewById<Button>(R.id.pauseLogs)!!.performClick() }
+        waitFor("Expired cursor did not reset to 2000 retained records") { count() == 2000 }
+        scenario.onActivity { dialog.findViewById<EditText>(R.id.logQuery)!!.setText("record-2399") }
+        waitFor("Newest row did not survive overflow") { count() == 1 }
+        scenario.onActivity { dialog.findViewById<EditText>(R.id.logQuery)!!.setText("script alpha") }
+        waitFor("Old filtered records were not released") { count() == 0 }
+    }
+
     private fun clickOption(text: String) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.waitForIdleSync()
+        // Popup enter/layout animations can move rows after their first accessibility snapshot.
+        instrumentation.uiAutomation.waitForIdle(200, 3000)
+        SystemClock.sleep(200)
         val until = SystemClock.elapsedRealtime() + 5_000
         while (SystemClock.elapsedRealtime() < until) {
             val node = instrumentation.uiAutomation.rootInActiveWindow?.findAccessibilityNodeInfosByText(text)
@@ -148,6 +167,8 @@ class DebugLogFilteringTest {
             if (done) return
             SystemClock.sleep(50)
         }
-        fail(message)
+        var state = ""
+        scenario.onActivity { state = " rows=${count()} source=${dialog.findViewById<Button>(R.id.logSource)!!.text} level=${dialog.findViewById<Button>(R.id.logLevel)!!.text} query=${dialog.findViewById<EditText>(R.id.logQuery)!!.text}" }
+        fail(message + state + " logs=" + DebugLog.readAfter(null).text.takeLast(1500))
     }
 }

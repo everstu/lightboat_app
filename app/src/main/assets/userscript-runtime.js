@@ -5,6 +5,8 @@ function LightboatRuntime(spec, entry) {
   const bridge = window.LightboatGM;
   const doc = (globalThis.crypto?.randomUUID?.() || Date.now() + '-' + Math.random()).toString();
   const pending = new Map();
+  const incoming = new Map();
+  const MAX_BYTES = 10 * 1024 * 1024, CHUNK_CHARS = 32 * 1024;
   const values = Object.assign(Object.create(null), spec.values);
   const valueWrites = new Map();
   const valueListeners = new Map();
@@ -26,10 +28,13 @@ function LightboatRuntime(spec, entry) {
     const id = String(++sequence);
     const promise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        const request = pending.get(id);
+        if (request) request.chunks = null;
         pending.delete(id);
         if (op === 'xhr') { try { post({ op: 'abort', requestId: id }); } catch (_) {} }
+        if (op === 'valueBegin' || op === 'valueChunk') { try { post({ op: 'valueAbort' }); } catch (_) {} }
         reject(Object.assign(new Error(op + ' 请求超时'), { event: 'timeout' }));
-      }, op === 'xhr' ? data.timeout : 15000);
+      }, op === 'xhr' ? data.timeout : 60000);
       pending.set(id, { resolve, reject, timer, onEvent });
       try { post({ op, id, ...data }); } catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
@@ -47,11 +52,8 @@ function LightboatRuntime(spec, entry) {
       if (listener.key === key) invoke(listener.callback, [key, decode(previous), decode(next), remote]);
     }
   };
-  bridge.onmessage = event => {
-    let message;
-    try { message = JSON.parse(event.data); } catch (_) { return; }
-    if (message.doc !== doc) return;
-    if (message.event === 'value') {
+  const receive = message => {
+    if (message.event === 'value' || message.event === 'snapshotValue') {
       // Native replies are ordered. Until our newer local writes are acknowledged,
       // an earlier frame notification must not roll back the optimistic snapshot.
       if (valueWrites.has(message.key)) return;
@@ -67,21 +69,98 @@ function LightboatRuntime(spec, entry) {
     }
     const request = pending.get(message.id);
     if (!request) return;
+    if (message.event === 'xhrChunk') {
+      const part = message.result;
+      request.chunks ||= [];
+      request.chunkSize ||= 0;
+      if (!part || part.index !== request.chunks.length || !['text', 'base64'].includes(part.kind) ||
+          request.chunkKind && part.kind !== request.chunkKind) throw new Error('GM 响应分片顺序无效');
+      request.chunkKind = part.kind;
+      const chunk = part.kind === 'base64' ? Uint8Array.from(atob(part.text), c => c.charCodeAt(0)) : part.text;
+      request.chunkSize += chunk.length;
+      if (request.chunkSize > MAX_BYTES) throw new Error('GM 请求响应不能超过 10 MiB');
+      request.chunks.push(chunk);
+      return;
+    }
     if (message.event === 'progress' || message.event === 'loadstart' || message.event === 'readystatechange') {
       request.onEvent?.(message);
       return;
     }
     clearTimeout(request.timer);
     pending.delete(message.id);
-    if (message.error) request.reject(Object.assign(new Error(message.error), { event: message.event || 'error' }));
-    else request.resolve(message.result);
+    if (message.error) { request.chunks = null; request.reject(Object.assign(new Error(message.error), { event: message.event || 'error' })); }
+    else {
+      const result = message.result;
+      if (result?.chunked) {
+        if (request.chunkKind === 'base64') {
+          const bytes = new Uint8Array(request.chunkSize || 0);
+          let offset = 0;
+          for (const chunk of request.chunks || []) { bytes.set(chunk, offset); offset += chunk.length; }
+          result.bytes = bytes;
+        } else result.responseText = (request.chunks || []).join('');
+        request.chunks = null;
+      }
+      request.resolve(result);
+    }
+  };
+  bridge.onmessage = event => {
+    let message;
+    try { message = JSON.parse(event.data); } catch (_) { return; }
+    if (message.doc !== doc) return;
+    if (message.event !== 'bridgeChunk') { receive(message); return; }
+    const id = message.transfer;
+    let transfer = incoming.get(id);
+    try {
+      if (!transfer) {
+        if (message.index !== 0 || incoming.size >= 16 || message.total > MAX_BYTES * 6 + 65536) throw new Error('GM 分片传输无效');
+        const timer = setTimeout(() => incoming.delete(id), 15000);
+        transfer = { chunks: [], size: 0, total: message.total, timer }; incoming.set(id, transfer);
+      }
+      if (message.index !== transfer.chunks.length || typeof message.text !== 'string' || message.text.length > CHUNK_CHARS ||
+          transfer.total !== message.total) throw new Error('GM 分片顺序无效');
+      clearTimeout(transfer.timer);
+      transfer.timer = setTimeout(() => incoming.delete(id), 15000);
+      transfer.chunks.push(message.text); transfer.size += message.text.length;
+      if (transfer.size > transfer.total) throw new Error('GM 分片长度无效');
+      if (message.last) {
+        incoming.delete(id); clearTimeout(transfer.timer);
+        if (transfer.size !== transfer.total) throw new Error('GM 分片不完整');
+        receive(JSON.parse(transfer.chunks.join('')));
+      }
+      post({ op: 'chunkAck', transfer: id, index: message.index });
+    } catch (error) {
+      if (transfer) clearTimeout(transfer.timer);
+      incoming.delete(id); report('error', errorText(error));
+    }
   };
   const sendDetached = (op, data) => rpc(op, data).promise.catch(error => report('error', errorText(error)));
   const getValue = (key, fallback) => Object.hasOwn ? (Object.hasOwn(values, key) ? decode(values[key]) : fallback) :
     (Object.prototype.hasOwnProperty.call(values, key) ? decode(values[key]) : fallback);
+  let storageQueue = Promise.resolve(), storageQueued = 0;
   const writeValue = (op, key, data = {}) => {
     valueWrites.set(key, (valueWrites.get(key) || 0) + 1);
-    return rpc(op, { key, ...data }).promise.finally(() => {
+    const text = op === 'setValue' ? JSON.stringify(data.value) : '';
+    const send = () => {
+      if (text.length <= CHUNK_CHARS) return rpc(op, { key, ...data }).promise;
+      if (text.length > MAX_BYTES) return Promise.reject(new Error('每个脚本的 GM 存储不能超过 10 MiB'));
+      return (async () => {
+        const transfer = await rpc('valueBegin', { key, characters: text.length }).promise;
+        let index = 0;
+        for (let start = 0; start < text.length;) {
+          let end = Math.min(start + CHUNK_CHARS, text.length);
+          if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end--;
+          await rpc('valueChunk', { transfer, index: index++, text: text.slice(start, end), last: end === text.length }).promise;
+          start = end;
+        }
+      })();
+    };
+    let request;
+    if (storageQueued || text.length > CHUNK_CHARS) {
+      storageQueued++;
+      request = storageQueue.then(send);
+      storageQueue = request.catch(() => {}).then(() => { storageQueued--; });
+    } else request = send();
+    return request.finally(() => {
       const remaining = valueWrites.get(key) - 1;
       if (remaining) valueWrites.set(key, remaining); else valueWrites.delete(key);
     });
@@ -143,7 +222,9 @@ function LightboatRuntime(spec, entry) {
     const response = { ...result, readyState: 4, responseText: result.responseText || '', responseXML: null };
     if (type === 'json') { try { response.response = JSON.parse(response.responseText); } catch (_) { response.response = null; } }
     else if (type === 'arraybuffer' || type === 'blob') {
-      const bytes = Uint8Array.from(atob(result.base64), char => char.charCodeAt(0));
+      const bytes = result.bytes || Uint8Array.from(atob(result.base64 || ''), char => char.charCodeAt(0));
+      delete response.bytes;
+      delete response.base64;
       response.response = type === 'blob' ? new Blob([bytes], { type: result.mime }) : bytes.buffer;
     } else if (type === 'document') {
       response.response = new DOMParser().parseFromString(response.responseText, 'text/html');
@@ -178,6 +259,7 @@ function LightboatRuntime(spec, entry) {
     const abort = () => {
       const pendingRequest = pending.get(request.id);
       if (abortSent || !pendingRequest) return;
+      pendingRequest.chunks = null;
       abortSent = true; clearTimeout(pendingRequest.timer); pending.delete(request.id);
       try { post({ op: 'abort', requestId: request.id }); } catch (_) {}
       pendingRequest.reject(Object.assign(new Error('请求已取消'), { event: 'abort' }));
@@ -300,7 +382,13 @@ function LightboatRuntime(spec, entry) {
         '）；混淆脚本已注入，但其中的 eval/new Function/WebAssembly 可能无法运行');
     }
   });
-  window.addEventListener('pagehide', () => { try { post({ op: 'dispose' }); } catch (_) {} });
+  window.addEventListener('pagehide', () => {
+    for (const transfer of incoming.values()) clearTimeout(transfer.timer);
+    incoming.clear();
+    for (const request of pending.values()) { clearTimeout(request.timer); request.chunks = null; request.reject(new Error('脚本文档已关闭')); }
+    pending.clear();
+    try { post({ op: 'dispose' }); } catch (_) {}
+  });
   const hello = rpc('hello').promise;
   report('info', meta.name + ' 已匹配（' + executionContext + '）；等待 ' + meta.runAt);
   if ([...grants].some(grant => /(?:Value|Values)/.test(grant))) {

@@ -46,7 +46,7 @@
 | 日志 | `GM_log` | `GM.log` |
 | 应用内文字提示 | `GM_notification` | `GM.notification` |
 
-GM 值按配置 ID + namespace + name 存入应用私有目录，与网页 localStorage 分离。支持 JSON 可序列化值和 undefined；每个脚本最多 1 MiB，键最多 512 字符。磁盘读取及原子写入使用应用内共用的串行后台队列，刷新配置后也保持先写后读；等待队列最多 64 项，超出时明确报错。旧式 set/delete 立即修改 JS 内存快照，再异步原子落盘；现代 API 可 await 落盘完成。损坏存储使用空快照继续启动，最多保留一份 1 MiB 内的原始副本并记录诊断；不会把存储内容写入日志。监听回调传入 `(key, oldValue, newValue, remote)`，remote 表示当前同脚本的其它 frame；旧的远程通知不会覆盖尚未确认的新本地写入。不支持跨独立应用进程同步。导出配置不包含 GM 值；修改脚本名称/namespace 或换配置 ID 会使用新的存储空间。
+GM 值按配置 ID + namespace + name 存入应用私有目录，与网页 localStorage 分离。支持 JSON 可序列化值和 undefined；每个脚本全部存储的 UTF-8 JSON（含键名和类型封装）最多 10 MiB，键最多 512 字符。磁盘读取及原子写入使用应用内共用的串行后台队列，等待队列最多 64 项，超出时明确报错。大值写入按最多 32 Ki 字符分片确认，临时落盘完整校验后才提交，超限/失败保持旧文件；启动快照逐键分片恢复，完成后再执行需要存储的脚本，不改变同步 getValue 行为。原生端保留编码值引用，不再深复制整个快照；旧的 1 MiB 文件格式兼容。旧式 set/delete 立即修改 JS 内存快照，再异步原子落盘；现代 API 可 await 落盘完成，大值应 await 后再刷新或切换配置，否则未完成分片会取消。损坏存储使用空快照继续启动，最多保留一份 10 MiB 内的原始副本并记录诊断；不会把存储内容写入日志。监听回调传入 `(key, oldValue, newValue, remote)`，remote 表示当前同脚本的其它 frame；大值远程通知也分片，旧通知不会覆盖尚未确认的新本地写入。不支持跨独立应用进程同步。导出配置不包含 GM 值；修改脚本名称/namespace 或换配置 ID 会使用新的存储空间。
 
 样式/元素在 head 尚未创建时也可排队插入。资源 URL 返回 data URL，适用于 CSS/图片；不同浏览器 CSP 可能限制 data URL。菜单注册返回 ID，支持 options.id 更新；命令显示在悬浮菜单的 **脚本命令** 中；不实现桌面 accessKey 快捷键等选项。文本复制需要近期用户点击/键盘操作或点选原生脚本命令，最多 64 Ki 字符；不支持 HTML 或图片写入。
 
@@ -60,7 +60,7 @@ notification 目前是原生应用内文字 Toast，拒绝点击回调、图片�
 
 支持 onloadstart/onprogress/onreadystatechange/onload/onerror/onabort/ontimeout；现代 Promise 带 `.abort()`。HTTP 4xx/5xx 作为正常响应返回，网络/TLS/超时进入对应错误路径。进度和 readyState 为应用合成状态，不保证与桌面油猴事件频率一致。
 
-不支持 stream、同步请求、FormData/Blob 正文、cookiePartition、显式 cookie/user/password、fetch 特殊行为、部分受保护请求头。请求正文最多 1 MiB，响应最多 4 MiB，同时最多 16 个请求。总超时包含排队时间，默认 30 秒；`timeout: 0` 或超过上限时按 120 秒处理。超时和主动 abort 会立即结束脚本侧请求、取消原生请求，并忽略迟到响应。Cookie 行为不是独立的浏览器请求隔离环境。
+不支持 stream、同步请求、FormData/Blob 正文、cookiePartition、显式 cookie/user/password、fetch 特殊行为、部分受保护请求头。请求正文最多 1 MiB，单次下载响应实际字节最多 10 MiB，已知长度和未知长度均检查；同时最多 16 个待处理请求、2 个网络工作线程。原生端增量解码并等待 JS 确认每个分片，不缓存完整响应或整包 base64；脚本仍在 onload/Promise 完成时取得完整文本或二进制，API 不是可读流。分片降低传输过程的额外副本和排队峰值，但完整响应、JSON 解析及脚本自己的规则对象仍占内存。总超时包含排队及分片传输时间，默认 30 秒；`timeout: 0` 或超过上限时按 120 秒处理。超时和主动 abort 会立即结束脚本侧请求、取消原生请求，释放已收分片并忽略迟到响应。Cookie 行为不是独立的浏览器请求隔离环境。
 
 ## 未实现功能与诊断
 

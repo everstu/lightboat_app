@@ -170,8 +170,7 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
         reading = true
         reader.execute {
             val result = runCatching { DebugLog.readAfter(from) }
-            val rows = result.getOrNull()?.text?.lineSequence()
-                ?.filter(String::isNotBlank)?.map(::DebugLogEntry)?.toList().orEmpty()
+            val rows = result.getOrNull()?.lines?.filter(String::isNotBlank)?.map(::DebugLogEntry).orEmpty()
             main.post {
                 val isCurrentRead = requestedReadId == readRequestId
                 if (isCurrentRead) reading = false
@@ -200,13 +199,16 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
         val anchorTop = layout.findViewByPosition(anchor)?.let { layout.getDecoratedTop(it) }
         if (update.reset) allRows.clear()
         allRows.addAll(rows)
+        val overflow = (allRows.size - DebugLog.MAX_ENTRIES).coerceAtLeast(0)
+        if (overflow > 0) allRows.subList(0, overflow).clear()
         val visible = rows.filter(filter::matches)
-        if (update.reset) entries.replace(visible) else entries.append(visible)
+        val retained = if (overflow > 0) allRows.filter(filter::matches) else visible
+        if (update.reset || overflow > 0) entries.replace(retained) else entries.append(visible)
         if (followTail && (update.reset || visible.isNotEmpty())) scrollToLatest()
-        else if (update.reset && anchorText != null && anchorTop != null && visible.isNotEmpty()) {
+        else if ((update.reset || overflow > 0) && anchorText != null && anchorTop != null && retained.isNotEmpty()) {
             // File trimming can remove old rows. Keep a surviving row at its old offset,
             // or stay at the oldest remaining row instead of jumping to the tail.
-            val restored = visible.indexOfFirst { it.raw == anchorText }.coerceAtLeast(0)
+            val restored = retained.indexOfFirst { it.raw == anchorText }.coerceAtLeast(0)
             layout.scrollToPositionWithOffset(restored, anchorTop - binding.logList.paddingTop)
         }
     }

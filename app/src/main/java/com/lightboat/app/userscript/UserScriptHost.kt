@@ -53,7 +53,11 @@ class UserScriptHost(
     private val bundle: ScriptBundle
 ) {
     data class Menu(val doc: String, val id: String, val title: String)
-    private data class Session(val url: String, val reply: JavaScriptReplyProxy)
+    private class Session(val url: String, val reply: JavaScriptReplyProxy, val transport: ScriptMessageTransport) {
+        @Volatile var closed = false
+        var upload: ScriptValueUpload? = null // Serial storage-worker access only.
+        var uploadId: String? = null
+    }
     private val token = UUID.randomUUID().toString()
     private val store = ScriptValueStore(activity, profile.id + ":" + bundle.metadata.first("namespace") + ":" + bundle.metadata.name)
     private val network = ScriptNetwork(bundle.metadata, profile.userAgent)
@@ -129,20 +133,30 @@ class UserScriptHost(
             try {
                 if (op == "hello") {
                     require(sessions.size < 100) { "脚本 frame 数量超过上限" }
-                    val session = Session(address, reply)
+                    val session = Session(address, reply, ScriptMessageTransport(doc, reply, handler))
                     sessions[doc] = session
                     val readsValues = meta.grants.any { it.contains("Value") }
-                    if (readsValues && "none" !in meta.grants) storageTask(session, { store.snapshot() })
+                    if (readsValues && "none" !in meta.grants) storageTask(session, {
+                        store.forEachEncoded { key, value ->
+                            if (!session.closed) session.transport.sendValue("snapshotValue", key, value)
+                        }
+                        JSONObject()
+                    })
                     else respond(JSONObject())
                     return@addWebMessageListener
                 }
                 val session = sessions[doc] ?: error("脚本文档已失效")
                 require(sameOrigin(URI(session.url), origin)) { "脚本来源不一致" }
+                if (op == "chunkAck") { session.transport.acknowledge(payload.getString("transfer"), payload.getInt("index")); return@addWebMessageListener }
                 if (op == "log") { log(payload.optString("level", "info"), payload.optString("text")); return@addWebMessageListener }
                 if (op == "dispose") { dispose(doc); return@addWebMessageListener }
                 if (op == "abort") { network.abort("$doc:${payload.getString("requestId")}"); return@addWebMessageListener }
+                if (op == "valueAbort") {
+                    ScriptStorage.worker.execute { session.upload?.close(); session.upload = null; session.uploadId = null }
+                    return@addWebMessageListener
+                }
                 val permission = when (op) {
-                    "setValue" -> listOf("GM_setValue", "GM.setValue", "GM_setValues", "GM.setValues")
+                    "setValue", "valueBegin", "valueChunk" -> listOf("GM_setValue", "GM.setValue", "GM_setValues", "GM.setValues")
                     "deleteValue" -> listOf("GM_deleteValue", "GM.deleteValue", "GM_deleteValues", "GM.deleteValues")
                     "menuRegister" -> listOf("GM_registerMenuCommand", "GM.registerMenuCommand")
                     "menuRemove" -> listOf("GM_unregisterMenuCommand", "GM.unregisterMenuCommand")
@@ -152,16 +166,60 @@ class UserScriptHost(
                     else -> error("不支持 GM 操作 $op")
                 }
                 require(permission.any { meta.permits(it) }) { "@grant 未授权 $op" }
+                fun broadcast(key: String, value: String?) {
+                    // Snapshot recipients on the UI thread; send in storage-worker order.
+                    val recipients = sessions.filterKeys { it != doc }.values.toList()
+                    ScriptStorage.worker.execute {
+                        recipients.forEach { recipient ->
+                            if (!recipient.closed) runCatching { recipient.transport.sendValue("value", key, value, value == null) }
+                        }
+                    }
+                }
                 when (op) {
+                    "valueBegin" -> {
+                        val key = payload.getString("key")
+                        val length = payload.getInt("characters")
+                        require(key.length <= 512 && length in 1..ScriptLimits.MAX_BYTES) { "GM 存储值不能超过 10 MiB" }
+                        storageTask(session, {
+                            check(!session.closed)
+                            session.upload?.close()
+                            session.upload = ScriptValueUpload(activity.cacheDir, key, length)
+                            UUID.randomUUID().toString().also { session.uploadId = it }
+                        }) { result ->
+                            respond(result)
+                            handler.postDelayed({
+                                ScriptStorage.worker.execute {
+                                    if (session.uploadId == result) { session.upload?.close(); session.upload = null; session.uploadId = null }
+                                }
+                            }, 120000)
+                        }
+                    }
+                    "valueChunk" -> storageTask(session, {
+                        check(!session.closed)
+                        require(payload.getString("transfer") == session.uploadId) { "GM 存储传输已失效" }
+                        val upload = session.upload ?: error("GM 存储传输不存在")
+                        try {
+                            val value = upload.append(payload.getInt("index"), payload.getString("text"), payload.getBoolean("last"))
+                            if (value != null) {
+                                store.updateEncoded(upload.key, value)
+                                upload.close(); session.upload = null; session.uploadId = null
+                                upload.key to value
+                            } else null
+                        } catch (error: Exception) { upload.close(); session.upload = null; session.uploadId = null; throw error }
+                    }) { result ->
+                        @Suppress("UNCHECKED_CAST")
+                        val value = result as? Pair<String, String>
+                        if (value != null) {
+                            broadcast(value.first, value.second)
+                        }
+                        respond()
+                    }
                     "setValue", "deleteValue" -> {
                         val key = payload.getString("key")
                         val value = if (op == "deleteValue") null else payload.getJSONObject("value")
                         if (value != null) require(value.optString("type") in setOf("json", "undefined")) { "存储值格式无效" }
-                        storageTask(session, { store.update(key, value) }) {
-                            sessions.filterKeys { it != doc }.forEach { (other, recipient) ->
-                                runCatching { recipient.reply.postMessage(JSONObject().put("doc", other).put("event", "value")
-                                    .put("key", key).put("value", value ?: JSONObject.NULL).put("deleted", value == null).toString()) }
-                            }
+                        storageTask(session, { check(!session.closed); store.update(key, value) }) {
+                            broadcast(key, value?.toString())
                             respond()
                         }
                     }
@@ -182,9 +240,13 @@ class UserScriptHost(
                     }
                     "notification" -> { Toast.makeText(activity, payload.getString("text").take(2000), Toast.LENGTH_LONG).show(); respond() }
                     "xhr" -> network.execute("$doc:$id", address, payload) { kind, result, error ->
+                        if (kind == "chunk") {
+                            if (!session.closed && result != null) session.transport.send(JSONObject().put("doc", doc).put("id", id)
+                                .put("event", "xhrChunk").put("result", result))
+                            return@execute
+                        }
                         val status = result?.optInt("status", 0) ?: 0
-                        val bytes = result?.optString("responseText")?.length ?: result?.optString("base64")?.length ?: 0
-                        DebugLog.event("gm-xhr", "event=$kind status=$status bytes=$bytes url=${DebugLog.safeUrl(address)} ok=${error == null} error=${error.orEmpty().take(180)}")
+                        DebugLog.event("gm-xhr", "event=$kind status=$status url=${DebugLog.safeUrl(address)} ok=${error == null} error=${error.orEmpty().take(180)}")
                         handler.post {
                             if (alive && sessions[doc] === session) {
                                 val response = JSONObject().put("doc", doc).put("id", id).put("event", kind)
@@ -210,14 +272,18 @@ class UserScriptHost(
     }
 
     private fun dispose(doc: String) {
-        sessions.remove(doc)
+        sessions.remove(doc)?.let { session ->
+            session.closed = true
+            session.transport.close()
+            ScriptStorage.worker.execute { session.upload?.close(); session.upload = null }
+        }
         commands.keys.filter { it.startsWith("$doc:") }.forEach { commands.remove(it) }
         network.abortDocument(doc)
     }
 
     fun resetDocuments() { sessions.keys.toList().forEach { dispose(it) } }
 
-    fun close() { alive = false; network.close(); sessions.clear(); commands.clear(); handler.removeCallbacksAndMessages(null) }
+    fun close() { alive = false; network.close(); sessions.keys.toList().forEach(::dispose); commands.clear(); handler.removeCallbacksAndMessages(null) }
 
     private fun sameOrigin(uri: URI, origin: Uri): Boolean {
         val uriPort = if (uri.port >= 0) uri.port else if (uri.scheme == "https") 443 else 80

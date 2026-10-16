@@ -8,7 +8,7 @@ const matcher = fs.readFileSync(path.join(assets, 'userscript-matcher.js'), 'utf
 const runtime = fs.readFileSync(path.join(assets, 'userscript-runtime.js'), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function harness(meta = {}, { url = 'https://example.com/page', frame = false, state = 'loading', values = {}, deferWrites = false,
+function harness(meta = {}, { url = 'https://example.com/page', frame = false, state = 'loading', values = {}, deferWrites = false, streamSnapshot = false,
   timers = { setTimeout, clearTimeout } } = {}) {
   const messages = [], nodes = [], listeners = {}, observers = [];
   const head = { appendChild(node) { nodes.push(node); } };
@@ -22,6 +22,10 @@ function harness(meta = {}, { url = 'https://example.com/page', frame = false, s
   window.top = frame ? {} : window;
   const bridge = { postMessage(text) {
     const msg = JSON.parse(text); messages.push(msg);
+    if (msg.op === 'hello' && streamSnapshot) return;
+    if (['valueBegin', 'valueChunk'].includes(msg.op)) {
+      bridge.onmessage({data: JSON.stringify({doc: msg.doc, id: msg.id, result: null})}); return;
+    }
     if (['hello', 'setValue', 'deleteValue', 'menuRegister', 'menuRemove', 'clipboard', 'notification'].includes(msg.op) &&
         !(deferWrites && ['setValue', 'deleteValue'].includes(msg.op))) {
       bridge.onmessage({ data: JSON.stringify({ doc: msg.doc, id: msg.id, result: msg.op === 'hello' ? values : null }) });
@@ -50,6 +54,64 @@ function harness(meta = {}, { url = 'https://example.com/page', frame = false, s
     reply(message) { bridge.onmessage({ data: JSON.stringify({ doc: 'frame-1', ...message }) }); },
   };
 }
+
+function deliverChunked(h, message, transfer = 'transfer-1') {
+  const text = JSON.stringify({doc: 'frame-1', ...message});
+  for (let offset = 0, index = 0; offset < text.length; index++) {
+    let end = Math.min(offset + 32768, text.length);
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end--;
+    h.reply({event:'bridgeChunk', transfer, index, total:text.length, text:text.slice(offset,end), last:end===text.length});
+    offset = end;
+  }
+}
+
+test('Restores a large per-key snapshot before document-start and chunks large writes transparently', async () => {
+  const h = harness({runAt:'document-start',grant:['GM_getValue','GM.setValue']}, {streamSnapshot:true});
+  h.run('window.cached=GM_getValue("large"); window.save=()=>GM.setValue("large",window.cached);');
+  assert.equal(h.context.window.cached,undefined);
+  const value='中🙂'.repeat(300000);
+  deliverChunked(h,{event:'snapshotValue',key:'large',value:{type:'json',value}});
+  h.reply({id:h.messages.find(m=>m.op==='hello').id,result:{}});
+  await flush();
+  assert.equal(h.context.window.cached,value);
+  await h.context.window.save();
+  const begin=h.messages.find(m=>m.op==='valueBegin'), chunks=h.messages.filter(m=>m.op==='valueChunk');
+  assert.ok(begin.characters>32768);
+  assert.ok(chunks.length>10);
+  assert.equal(chunks.map(m=>m.text).join(''),JSON.stringify({type:'json',value}));
+  assert.ok(chunks.every((m,index)=>m.index===index&&m.text.length<=32768));
+  assert.equal(chunks.at(-1).last,true);
+  assert.ok(!h.messages.some(m=>m.op==='setValue'));
+});
+
+test('Assembles streamed text and binary responses without changing callback or response types', async () => {
+  const h=harness({runAt:'document-start',grant:['GM.xmlHttpRequest']});
+  h.run('window.text=GM.xmlHttpRequest({url:"/text",onload:r=>window.callbackText=r.responseText}); window.binary=GM.xmlHttpRequest({url:"/binary",responseType:"arraybuffer"});');
+  const [text,binary]=h.messages.filter(m=>m.op==='xhr');
+  const piece='hello 中🙂'.repeat(1000);
+  for(let index=0;index<10;index++)deliverChunked(h,{id:text.id,event:'xhrChunk',result:{index,kind:'text',text:piece}},'text-'+index);
+  h.reply({id:text.id,result:{status:200,chunked:true,responseText:''}});
+  const a=Buffer.from([0,255,1]),b=Buffer.from([2,3]);
+  [a,b].forEach((bytes,index)=>deliverChunked(h,{id:binary.id,event:'xhrChunk',result:{index,kind:'base64',text:bytes.toString('base64')}},'binary-'+index));
+  h.reply({id:binary.id,result:{status:200,chunked:true,responseText:''}});
+  assert.equal((await h.context.window.text).responseText,piece.repeat(10));
+  assert.equal(h.context.window.callbackText,piece.repeat(10));
+  assert.deepEqual(Buffer.from((await h.context.window.binary).response),Buffer.concat([a,b]));
+});
+
+test('Rejects out-of-order packets and ignores completed or aborted response chunks', async () => {
+  const h=harness({runAt:'document-start',grant:['GM.xmlHttpRequest']});
+  h.run('window.result=GM.xmlHttpRequest({url:"/large"}).catch(e=>e.event); window.request=GM.xmlHttpRequest({url:"/abort"}); window.cancel=window.request.catch(e=>e.event);');
+  const requests=h.messages.filter(m=>m.op==='xhr');
+  h.reply({event:'bridgeChunk',transfer:'bad',index:1,total:10,text:'bad',last:true});
+  assert.ok(!h.messages.some(m=>m.op==='chunkAck'&&m.transfer==='bad'));
+  deliverChunked(h,{id:requests[1].id,event:'xhrChunk',result:{index:0,kind:'text',text:'partial'}});
+  h.context.window.request.abort();
+  assert.equal(await h.context.window.cancel,'abort');
+  deliverChunked(h,{id:requests[1].id,event:'xhrChunk',result:{index:1,kind:'text',text:'ignored'}},'late');
+  h.reply({id:requests[0].id,error:'response too large',event:'error'});
+  assert.equal(await h.context.window.result,'error');
+});
 
 test('Match patterns use host boundaries, schemes, paths and exclusion rules', () => {
   const h = harness();
