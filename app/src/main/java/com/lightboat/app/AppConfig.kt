@@ -40,6 +40,16 @@ data class AppConfig(
         return next.upsert(profile.copy(categoryId = categoryId))
     }
 
+    fun renameCategory(id: String, value: String): AppConfig {
+        require(categories.containsKey(id)) { "分类不存在" }
+        val name = normalizeCategoryName(value)
+        require(name.isNotEmpty()) { "请填写分类名称" }
+        require(categories.none { (otherId, otherName) -> otherId != id && otherName.equals(name, ignoreCase = true) }) {
+            "已有同名分类，请使用其他名称"
+        }
+        return copy(categories = categories + (id to name))
+    }
+
     fun remove(id: String): AppConfig {
         val next = profiles.filterNot { it.id == id }
         return copy(lastProfileId = if (lastProfileId == id) next.firstOrNull()?.id else lastProfileId, profiles = next)

@@ -146,4 +146,28 @@ class ProfileOrganizationTest {
         assertThrows(IllegalArgumentException::class.java) { ConfigCodec.decode(root.toString()) }
         assertEquals(mapOf("work" to "工作", "play" to "娱乐"), grouped.categories)
     }
+
+    @Test fun renamingCategoryKeepsItsIdAllProfilesSelectionFavoritesAndOrder() {
+        val next = grouped.renameCategory("work", "  日常  ")
+        assertEquals("日常", next.categories["work"])
+        assertEquals(grouped.categories.keys.toList(), next.categories.keys.toList())
+        assertEquals("娱乐", next.categories["play"])
+        assertEquals(grouped.profiles, next.profiles)
+        assertEquals(grouped.lastProfileId, next.lastProfileId)
+        assertEquals(ProfileFilter("work"), ProfileFilter("work").resolve(next))
+        assertEquals(listOf("a", "c", "d"), ProfileFilter("work").apply(next).map { it.id })
+        assertEquals(next, ConfigCodec.decode(ConfigCodec.encode(next)))
+    }
+
+    @Test fun renameRejectsUnknownEmptyDuplicateAndInvalidNamesWithoutChangingTheRegistry() {
+        assertThrows(IllegalArgumentException::class.java) { grouped.renameCategory("missing", "新分类") }
+        listOf("", "  ", "娱乐", "a\nb", "x".repeat(61)).forEach { name ->
+            assertThrows(IllegalArgumentException::class.java) { grouped.renameCategory("work", name) }
+        }
+        val latin = grouped.copy(categories = grouped.categories + ("unused" to "Work"))
+        assertThrows(IllegalArgumentException::class.java) { latin.renameCategory("play", " work ") }
+        assertEquals("WORK", latin.renameCategory("unused", "WORK").categories["unused"])
+        assertEquals(grouped.profiles, latin.renameCategory("unused", "已归档").profiles)
+        assertEquals(mapOf("work" to "工作", "play" to "娱乐"), grouped.categories)
+    }
 }

@@ -195,6 +195,7 @@ class MainActivity : AppCompatActivity() {
         binding.emptyAddButton.setOnClickListener { showEditor(null) }
         binding.emptyImportButton.setOnClickListener { showConfigImport() }
         binding.resetProfileFilters.setOnClickListener { changeProfileFilter(ProfileFilter()) }
+        binding.renameCategories.setOnClickListener { showCategoryRename() }
         categoryNameInputFilter = CategoryNameInputFilter(binding.categoryFilter.paint, {
             val label = binding.categoryFilter
             val available = label.width - label.compoundPaddingLeft - label.compoundPaddingRight
@@ -501,6 +502,7 @@ class MainActivity : AppCompatActivity() {
         bindProfileCategoryFilter(binding.categoryFilter, config, profileFilter, ::changeProfileFilter)
         bindProfileFavoriteFilter(binding.favoriteFilter, profileFilter, ::changeProfileFilter)
         binding.profileFilters.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
+        binding.renameCategories.visibility = if (config.categories.isEmpty()) View.GONE else View.VISIBLE
         binding.emptyProfiles.visibility = if (config.profiles.isEmpty()) View.VISIBLE else View.GONE
         binding.profilesSection.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
         binding.profilesList.visibility = if (visible.isEmpty()) View.GONE else View.VISIBLE
@@ -518,6 +520,18 @@ class MainActivity : AppCompatActivity() {
         profileOrderDirty = false
         profileOrderFilter = profileFilter
         profileAdapter.submit(config, currentId.takeIf { webView != null }, visible)
+    }
+
+    private fun showCategoryRename() {
+        commitProfileOrder()
+        if (config.categories.isEmpty()) return
+        showNativeDialog(CategoryRenameDialog(this, config, profileFilter.categoryId, categoryNameInputFilter) { next ->
+            if (!persist(next)) false else {
+                renderProfiles()
+                toast(getString(R.string.category_renamed))
+                true
+            }
+        })
     }
 
     private fun setupProfileList() {

@@ -146,6 +146,9 @@
                     android:paddingStart="24dp" android:paddingEnd="12dp" android:gravity="center_vertical">
                     <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
                         android:text="@string/profiles_title" android:textColor="@color/ink" android:textSize="28sp" android:textStyle="bold" />
+                    <Button android:id="@+id/renameCategories" style="@style/ConfigAction" android:layout_width="wrap_content"
+                        android:layout_height="48dp" android:paddingHorizontal="12dp" android:textSize="13sp"
+                        android:text="@string/category_rename_action" android:visibility="gone" />
                     <ImageButton android:id="@+id/returnButton" android:layout_width="48dp" android:layout_height="48dp"
                         android:src="@drawable/ic_back" android:contentDescription="@string/cancel"
                         android:background="?attr/selectableItemBackgroundBorderless" android:visibility="gone" />

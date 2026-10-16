@@ -36,10 +36,10 @@
         android:gravity="center">
         <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
         <Button android:id="@+id/openProfile" style="@style/ProfileCardAction.Primary" android:layout_width="wrap_content"
-            android:layout_height="48dp" android:text="@string/switch_profile" />
+            android:layout_height="52dp" android:text="@string/switch_profile" />
         <Space android:layout_width="24dp" android:layout_height="1dp" android:layout_weight="1" />
         <Button android:id="@+id/editProfile" style="@style/ProfileCardAction.Secondary" android:layout_width="wrap_content"
-            android:layout_height="48dp" android:text="@string/edit" />
+            android:layout_height="52dp" android:text="@string/edit" />
         <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
     </LinearLayout>
 </LinearLayout>
