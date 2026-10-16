@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#194D6090">
-    <item><shape><solid android:color="@color/category_badge_fill" /><corners android:radius="16dp" /></shape></item>
-</ripple>
+<inset xmlns:android="http://schemas.android.com/apk/res/android" android:insetTop="4dp" android:insetBottom="4dp">
+    <ripple android:color="#194D6090">
+        <item><shape><solid android:color="@color/category_badge_fill" /><corners android:radius="12dp" /></shape></item>
+    </ripple>
+</inset>

@@ -904,7 +904,10 @@ class MainActivity : AppCompatActivity() {
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
                 DebugLog.event("http-error", "${request.method} ${DebugLog.safeUrl(request.url.toString())} status=${response.statusCode}")
                 if (request.isForMainFrame && isCurrentNavigation()) {
-                    failPage(getString(R.string.page_http_error, response.statusCode))
+                    // HTTP errors can contain a working verification/login page.
+                    // Let Chromium display it and keep its redirects, scripts and cookies alive.
+                    DebugLog.event("page", "showing HTTP ${response.statusCode} response in browser")
+                    revealPage(view)
                 }
             }
 
@@ -958,10 +961,13 @@ class MainActivity : AppCompatActivity() {
         }
         userScriptHost = bundle?.let { UserScriptHost(this, view, profile, it) }
         userScriptHost?.let { scriptHandlers += it.install() }
-        showLoading(R.string.loading_page)
         view.onResume()
         // Browser requests use WebView identity; direct media uses the profile proxy.
         applyProfileUserAgent(view, profile)
+        // Scripts are registered; show the browser now so loading and verification
+        // remain interactive without waiting for a commit or a finished document.
+        revealPage(view)
+        updatePageProgress(0, true)
         view.loadUrl(profile.url)
     }
 

@@ -75,6 +75,31 @@
     <style name="ProfileCardAction.Secondary" parent="ProfileCardAction">
         <item name="android:background">@drawable/bg_profile_action_secondary</item>
     </style>
+    <style name="BrowserMenuAction" parent="ConfigSecondary">
+        <item name="android:layout_height">48dp</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">10dp</item>
+        <item name="android:paddingEnd">10dp</item>
+        <item name="android:paddingTop">0dp</item>
+        <item name="android:paddingBottom">0dp</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:background">@drawable/bg_browser_menu_secondary</item>
+    </style>
+    <style name="BrowserMenuAction.Primary" parent="BrowserMenuAction">
+        <item name="android:background">@drawable/bg_browser_menu_primary</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="BrowserMenuAction.Tinted" parent="BrowserMenuAction">
+        <item name="android:background">@drawable/bg_menu_settings</item>
+        <item name="android:textColor">@color/category_badge_ink</item>
+    </style>
+    <style name="BrowserMenuAction.Commands" parent="BrowserMenuAction">
+        <item name="android:background">?attr/selectableItemBackground</item>
+    </style>
     <style name="ConfigSegment" parent="ConfigAction">
         <item name="android:background">@drawable/bg_config_segment</item>
         <item name="android:textColor">@color/config_segment_text</item>
