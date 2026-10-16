@@ -6,8 +6,10 @@ function LightboatRuntime(spec, entry) {
   const doc = (globalThis.crypto?.randomUUID?.() || Date.now() + '-' + Math.random()).toString();
   const pending = new Map();
   const values = Object.assign(Object.create(null), spec.values);
+  const valueWrites = new Map();
   const valueListeners = new Map();
   const menus = new Map();
+  const unavailableResourceWarnings = new Set();
   let sequence = 0;
   const grants = new Set(meta.grant || []);
   const permitted = name => !grants.has('none') && grants.has(name);
@@ -25,8 +27,9 @@ function LightboatRuntime(spec, entry) {
     const promise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
-        reject(new Error(op + ' 请求超时'));
-      }, op === 'xhr' ? Math.max(120000, (data.timeout || 30000) + 10000) : 15000);
+        if (op === 'xhr') { try { post({ op: 'abort', requestId: id }); } catch (_) {} }
+        reject(Object.assign(new Error(op + ' 请求超时'), { event: 'timeout' }));
+      }, op === 'xhr' ? data.timeout : 15000);
       pending.set(id, { resolve, reject, timer, onEvent });
       try { post({ op, id, ...data }); } catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
@@ -49,6 +52,9 @@ function LightboatRuntime(spec, entry) {
     try { message = JSON.parse(event.data); } catch (_) { return; }
     if (message.doc !== doc) return;
     if (message.event === 'value') {
+      // Native replies are ordered. Until our newer local writes are acknowledged,
+      // an earlier frame notification must not roll back the optimistic snapshot.
+      if (valueWrites.has(message.key)) return;
       const old = values[message.key];
       if (message.deleted) delete values[message.key]; else values[message.key] = message.value;
       notifyValue(message.key, old, values[message.key], true);
@@ -73,20 +79,27 @@ function LightboatRuntime(spec, entry) {
   const sendDetached = (op, data) => rpc(op, data).promise.catch(error => report('error', errorText(error)));
   const getValue = (key, fallback) => Object.hasOwn ? (Object.hasOwn(values, key) ? decode(values[key]) : fallback) :
     (Object.prototype.hasOwnProperty.call(values, key) ? decode(values[key]) : fallback);
+  const writeValue = (op, key, data = {}) => {
+    valueWrites.set(key, (valueWrites.get(key) || 0) + 1);
+    return rpc(op, { key, ...data }).promise.finally(() => {
+      const remaining = valueWrites.get(key) - 1;
+      if (remaining) valueWrites.set(key, remaining); else valueWrites.delete(key);
+    });
+  };
   const setValue = (key, value, wait) => {
     key = String(key);
     const old = values[key];
     const next = encode(value);
     values[key] = next;
     notifyValue(key, old, next, false);
-    const request = rpc('setValue', { key, value: next }).promise;
+    const request = writeValue('setValue', key, { value: next });
     if (wait) return request;
     request.catch(error => report('error', errorText(error)));
   };
   const deleteValue = (key, wait) => {
     key = String(key);
     const old = values[key]; delete values[key]; notifyValue(key, old, undefined, false);
-    const request = rpc('deleteValue', { key }).promise;
+    const request = writeValue('deleteValue', key);
     if (wait) return request;
     request.catch(error => report('error', errorText(error)));
   };
@@ -112,7 +125,12 @@ function LightboatRuntime(spec, entry) {
   };
   const resource = name => {
     if (!Object.prototype.hasOwnProperty.call(spec.resources, name)) throw new Error('未声明 @resource ' + name);
-    return spec.resources[name];
+    const item = spec.resources[name];
+    if (item.error && !unavailableResourceWarnings.has(name)) {
+      unavailableResourceWarnings.add(name);
+      report('warning', '@resource ' + name + ' 下载失败，使用空资源：' + item.error);
+    }
+    return item;
   };
   const registerMenu = (title, callback, options) => {
     const menuId = String(typeof options === 'object' && options?.id != null ? options.id : ++sequence);
@@ -145,8 +163,10 @@ function LightboatRuntime(spec, entry) {
       data = { base64: btoa(text) };
     } else if (data instanceof URLSearchParams) data = data.toString();
     else if (data != null && typeof data !== 'string') throw new TypeError('请求正文仅支持字符串、URLSearchParams 或字节数组');
+    const rawTimeout = Number(details.timeout ?? 30000);
+    const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.max(1, Math.min(120000, Math.trunc(rawTimeout))) : 120000;
     const request = rpc('xhr', { target: new URL(details.url, location.href).href, method: details.method || 'GET',
-      headers: details.headers || {}, data, timeout: details.timeout || 30000, anonymous: !!details.anonymous,
+      headers: details.headers || {}, data, timeout, anonymous: !!details.anonymous,
       responseType: type }, event => {
       const callback = details['on' + event.event];
       if (typeof callback === 'function') invoke(callback, [{ ...event.result, context: details.context }]);
@@ -155,7 +175,13 @@ function LightboatRuntime(spec, entry) {
       }
     });
     let abortSent = false;
-    const abort = () => { if (!abortSent) { abortSent = true; post({ op: 'abort', requestId: request.id }); } };
+    const abort = () => {
+      const pendingRequest = pending.get(request.id);
+      if (abortSent || !pendingRequest) return;
+      abortSent = true; clearTimeout(pendingRequest.timer); pending.delete(request.id);
+      try { post({ op: 'abort', requestId: request.id }); } catch (_) {}
+      pendingRequest.reject(Object.assign(new Error('请求已取消'), { event: 'abort' }));
+    };
     const promise = request.promise.then(result => {
       const response = convertResponse(result, type); response.context = details.context;
       if (details.onreadystatechange) invoke(details.onreadystatechange, [response]);

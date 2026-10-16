@@ -4,8 +4,34 @@
     const mode = typeof assetMode === 'undefined' ? 'script' : assetMode;
     // Force a fresh script for every configuration launch. Chromium still owns
     // cookies, connections and storage; no script body is persisted by us.
-    const response = await fetch(scriptUrl, { cache: 'no-store', credentials: 'same-origin' });
-    if (!response.ok) throw new Error(`脚本服务器返回 HTTP ${response.status}`);
+    // These are standalone script downloads, not resources referred by the
+    // synthetic helper page. Do not invent a Referer for the target server.
+    const response = await fetch(scriptUrl, {
+      cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'no-referrer'
+    });
+    if (!response.ok) {
+      let reason = '';
+      if (response.status === 418) {
+        const reader = response.body?.getReader();
+        if (reader) {
+          let preview = '', size = 0;
+          const decoder = new TextDecoder();
+          try {
+            while (size < 4096) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              const chunk = value.subarray(0, 4096 - size);
+              size += chunk.byteLength;
+              preview += decoder.decode(chunk, { stream: true });
+            }
+            if (/CloudWAF|疑似攻击行为|访问被拦截/i.test(preview)) reason = '（CloudWAF 拦截）';
+          } catch (_) {
+            // Preserve the HTTP status even if its diagnostic body is unreadable.
+          } finally { await reader.cancel().catch(() => {}); }
+        }
+      }
+      throw new Error(`脚本服务器返回 HTTP ${response.status}${reason}`);
+    }
     const contentType = response.headers.get('Content-Type') || '';
     const mime = contentType.split(';')[0].trim().toLowerCase();
     const accepted = ['application/javascript', 'text/javascript', 'application/ecmascript',

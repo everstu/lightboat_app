@@ -27,124 +27,150 @@
                 android:layout_height="0dp" android:layout_weight="1" />
         </LinearLayout>
 
-        <ScrollView android:id="@+id/configPanel" android:layout_width="match_parent"
-            android:layout_height="match_parent" android:fillViewport="true">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:paddingStart="28dp" android:paddingEnd="28dp"
-                android:paddingTop="32dp" android:paddingBottom="32dp">
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:text="@string/brand_note" android:textColor="@color/accent" android:textSize="14sp" />
-                <TextView android:id="@+id/configTitle" android:layout_width="match_parent"
-                    android:layout_height="wrap_content" android:layout_marginTop="16dp"
-                    android:text="@string/setup_title" android:textSize="30sp" android:textStyle="bold"
-                    android:textColor="@color/ink" />
-                <TextView android:id="@+id/configDescription" android:layout_width="match_parent"
-                    android:layout_height="wrap_content" android:layout_marginTop="12dp"
-                    android:text="@string/setup_description" android:textColor="@color/muted"
-                    android:textSize="15sp" android:lineSpacingExtra="4dp" />
-                <TextView style="@style/FieldLabel" android:layout_marginTop="36dp"
-                    android:text="@string/profile_name" android:labelFor="@id/nameInput" />
-                <EditText android:id="@+id/nameInput" style="@style/UrlField" android:inputType="textCapSentences"
-                    android:hint="@string/profile_name_hint" android:maxLength="60" android:imeOptions="actionNext" />
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="24dp" android:gravity="center_vertical">
-                    <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
-                        android:text="@string/website_label" android:labelFor="@id/websiteInput" />
-                    <ImageButton android:id="@+id/scanWebsiteButton" android:layout_width="48dp" android:layout_height="48dp"
-                        android:src="@drawable/ic_scan" android:contentDescription="@string/scan_website"
-                        android:background="?attr/selectableItemBackgroundBorderless" />
-                </LinearLayout>
-                <EditText android:id="@+id/websiteInput" style="@style/UrlField"
-                    android:hint="@string/website_hint" android:imeOptions="actionNext" />
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="24dp" android:gravity="center_vertical">
-                    <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
-                        android:text="@string/script_label" android:labelFor="@id/scriptInput" />
-                    <ImageButton android:id="@+id/scanScriptButton" android:layout_width="48dp" android:layout_height="48dp"
-                        android:src="@drawable/ic_scan" android:contentDescription="@string/scan_script"
-                        android:background="?attr/selectableItemBackgroundBorderless" />
-                </LinearLayout>
-                <EditText android:id="@+id/scriptInput" style="@style/UrlField"
-                    android:hint="@string/script_hint" android:imeOptions="actionDone" />
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp" android:text="@string/script_help"
-                    android:textColor="@color/muted" android:textSize="13sp" />
-                <TextView style="@style/FieldLabel" android:layout_marginTop="24dp"
-                    android:text="@string/user_agent_label" android:labelFor="@id/userAgentInput" />
-                <EditText android:id="@+id/userAgentInput" style="@style/UrlField"
-                    android:inputType="textMultiLine|textNoSuggestions" android:singleLine="false"
-                    android:minLines="3" android:maxLines="8" android:maxLength="2048" android:gravity="top|start"
-                    android:hint="@string/user_agent_label" />
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp" android:text="@string/platform_help"
-                    android:textColor="@color/muted" android:textSize="13sp" />
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-                    <Button android:id="@+id/applePlatformButton" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="48dp" style="?attr/borderlessButtonStyle"
-                        android:text="@string/platform_apple" android:textColor="@color/accent" />
-                    <Button android:id="@+id/androidPlatformButton" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="48dp" style="?attr/borderlessButtonStyle"
-                        android:text="@string/platform_android" android:textColor="@color/accent" />
-                    <Button android:id="@+id/windowsPlatformButton" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="48dp" style="?attr/borderlessButtonStyle"
-                        android:text="@string/platform_windows" android:textColor="@color/accent" />
-                </LinearLayout>
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="32dp" android:orientation="horizontal">
-                    <Button android:id="@+id/saveButton" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="60dp" android:text="@string/save_profile"
-                        android:textColor="@color/white" android:backgroundTint="@color/accent" android:textSize="16sp" />
-                    <Button android:id="@+id/saveOpenButton" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="60dp" android:layout_marginStart="12dp"
-                        style="?attr/borderlessButtonStyle" android:text="@string/save_open"
-                        android:textColor="@color/accent" android:textSize="16sp" />
-                </LinearLayout>
-                <Button android:id="@+id/cancelButton" android:layout_width="match_parent"
-                    android:layout_height="52dp" android:text="@string/cancel" android:visibility="gone"
-                    style="?attr/borderlessButtonStyle" android:textColor="@color/accent" />
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="24dp" android:text="@string/setup_note"
-                    android:textSize="13sp" android:textColor="@color/muted" android:lineSpacingExtra="5dp" />
+        <LinearLayout android:id="@+id/configPanel" android:layout_width="match_parent"
+            android:layout_height="match_parent" android:orientation="vertical" android:focusableInTouchMode="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="64dp"
+                android:paddingHorizontal="12dp" android:gravity="center_vertical">
+                <ImageButton android:id="@+id/cancelButton" android:layout_width="48dp" android:layout_height="48dp"
+                    android:src="@drawable/ic_back" android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/profile_close_editor" />
+                <TextView android:id="@+id/configTitle" android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                    android:text="@string/setup_title" android:textSize="22sp" android:textStyle="bold" android:textColor="@color/ink" />
             </LinearLayout>
-        </ScrollView>
+            <ScrollView android:id="@+id/editorScroll" android:layout_width="match_parent" android:layout_height="0dp"
+                android:layout_weight="1" android:fillViewport="true" android:clipToPadding="false">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical" android:paddingHorizontal="20dp" android:paddingBottom="24dp">
+                    <TextView android:id="@+id/configDescription" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="24dp"
+                        android:text="@string/setup_description" android:textColor="@color/muted" android:textSize="14sp" android:lineSpacingExtra="4dp" />
+                    <TextView style="@style/FieldLabel" android:text="@string/profile_basics" android:layout_marginBottom="12dp" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="16dp">
+                        <TextView style="@style/FieldLabel" android:text="@string/profile_name" android:labelFor="@id/nameInput" />
+                        <EditText android:id="@+id/nameInput" style="@style/UrlField" android:inputType="textCapSentences"
+                            android:hint="@string/profile_name_hint" android:maxLength="60" android:imeOptions="actionNext" />
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:layout_marginTop="16dp" android:gravity="center_vertical">
+                            <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
+                                android:text="@string/website_label" android:labelFor="@id/websiteInput" />
+                            <ImageButton android:id="@+id/scanWebsiteButton" android:layout_width="48dp" android:layout_height="48dp"
+                                android:src="@drawable/ic_scan" android:contentDescription="@string/scan_website"
+                                android:background="?attr/selectableItemBackgroundBorderless" />
+                        </LinearLayout>
+                        <EditText android:id="@+id/websiteInput" style="@style/UrlField" android:layout_marginTop="0dp"
+                            android:hint="@string/website_hint" android:imeOptions="actionNext" />
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:layout_marginTop="16dp" android:gravity="center_vertical">
+                            <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
+                                android:text="@string/script_label" android:labelFor="@id/scriptInput" />
+                            <ImageButton android:id="@+id/scanScriptButton" android:layout_width="48dp" android:layout_height="48dp"
+                                android:src="@drawable/ic_scan" android:contentDescription="@string/scan_script"
+                                android:background="?attr/selectableItemBackgroundBorderless" />
+                        </LinearLayout>
+                        <EditText android:id="@+id/scriptInput" style="@style/UrlField" android:layout_marginTop="0dp"
+                            android:hint="@string/script_hint" android:imeOptions="actionDone" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp" android:text="@string/script_help"
+                            android:textColor="@color/muted" android:textSize="12sp" android:lineSpacingExtra="3dp" />
+                    </LinearLayout>
+                    <TextView style="@style/FieldLabel" android:layout_marginTop="28dp" android:layout_marginBottom="12dp"
+                        android:text="@string/profile_access" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="16dp">
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:text="@string/platform_help" android:textColor="@color/muted" android:textSize="13sp" android:lineSpacingExtra="3dp" />
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp">
+                            <Button android:id="@+id/applePlatformButton" style="@style/ConfigSegment" android:layout_width="0dp"
+                                android:layout_weight="1" android:layout_height="48dp" android:text="@string/platform_apple" />
+                            <Button android:id="@+id/androidPlatformButton" style="@style/ConfigSegment" android:layout_width="0dp"
+                                android:layout_weight="1" android:layout_height="48dp" android:layout_marginHorizontal="8dp" android:text="@string/platform_android" />
+                            <Button android:id="@+id/windowsPlatformButton" style="@style/ConfigSegment" android:layout_width="0dp"
+                                android:layout_weight="1" android:layout_height="48dp" android:text="@string/platform_windows" />
+                        </LinearLayout>
+                        <TextView style="@style/FieldLabel" android:layout_marginTop="20dp"
+                            android:text="@string/user_agent_label" android:labelFor="@id/userAgentInput" />
+                        <EditText android:id="@+id/userAgentInput" style="@style/UrlField" android:textSize="13sp" android:fontFamily="monospace"
+                            android:inputType="textMultiLine|textNoSuggestions" android:singleLine="false"
+                            android:minLines="3" android:maxLines="6" android:maxLength="2048" android:gravity="top|start"
+                            android:hint="@string/user_agent_label" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp" android:text="@string/profile_ua_hint" android:textSize="12sp" android:textColor="@color/muted" />
+                    </LinearLayout>
+                </LinearLayout>
+            </ScrollView>
+            <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/line" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:paddingHorizontal="20dp" android:paddingVertical="12dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="10dp"
+                    android:text="@string/setup_note" android:textSize="12sp" android:textColor="@color/muted" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <Button android:id="@+id/saveButton" style="@style/ConfigPrimary" android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="52dp" android:text="@string/save_profile" />
+                    <Button android:id="@+id/saveOpenButton" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="52dp" android:layout_marginStart="12dp" android:text="@string/save_open" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
 
         <FrameLayout android:id="@+id/profilesPanel" android:layout_width="match_parent"
             android:layout_height="match_parent" android:visibility="gone">
             <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
-                android:orientation="vertical" android:padding="24dp">
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:text="@string/profiles_title" android:textColor="@color/ink"
-                    android:textSize="30sp" android:textStyle="bold" />
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp" android:text="@string/profiles_note"
-                    android:textColor="@color/muted" android:textSize="15sp" android:lineSpacingExtra="4dp" />
-                <TextView android:id="@+id/versionLabel" android:layout_width="match_parent"
-                    android:layout_height="wrap_content" android:layout_marginTop="8dp"
-                    android:textColor="@color/muted" android:textSize="13sp" />
-                <TextView android:id="@+id/emptyProfiles" android:layout_width="match_parent"
-                    android:layout_height="wrap_content" android:layout_marginTop="32dp" android:padding="24dp"
-                    android:gravity="center" android:background="@drawable/bg_input"
-                    android:text="@string/empty_profiles" android:textColor="@color/muted" android:textSize="16sp" />
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
-                    <Button android:id="@+id/importButton" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="52dp" style="?attr/borderlessButtonStyle"
-                        android:text="@string/import_config" android:textColor="@color/accent" />
-                    <Button android:id="@+id/exportButton" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="52dp" style="?attr/borderlessButtonStyle"
-                        android:text="@string/export_config" android:textColor="@color/accent" />
+                android:orientation="vertical" android:paddingTop="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:paddingStart="24dp" android:paddingEnd="12dp" android:gravity="center_vertical">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                        android:text="@string/profiles_title" android:textColor="@color/ink" android:textSize="28sp" android:textStyle="bold" />
+                    <ImageButton android:id="@+id/returnButton" android:layout_width="48dp" android:layout_height="48dp"
+                        android:src="@drawable/ic_back" android:contentDescription="@string/cancel"
+                        android:background="?attr/selectableItemBackgroundBorderless" android:visibility="gone" />
                 </LinearLayout>
-                <Button android:id="@+id/returnButton" android:layout_width="match_parent" android:layout_height="52dp"
-                    style="?attr/borderlessButtonStyle" android:text="@string/cancel"
-                    android:textColor="@color/accent" android:visibility="gone" />
-                <androidx.recyclerview.widget.RecyclerView android:id="@+id/profilesList" android:layout_width="match_parent"
-                    android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="16dp"
-                    android:paddingBottom="80dp" android:clipToPadding="false" android:scrollbars="vertical" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:paddingHorizontal="24dp" android:layout_marginTop="4dp" android:text="@string/profiles_note"
+                    android:textColor="@color/muted" android:textSize="14sp" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:paddingHorizontal="24dp" android:layout_marginTop="24dp">
+                    <Button android:id="@+id/importButton" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="52dp" android:drawableStart="@drawable/ic_import" android:drawablePadding="8dp" android:text="@string/import_config" />
+                    <Button android:id="@+id/exportButton" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="52dp" android:layout_marginStart="12dp" android:drawableStart="@drawable/ic_export"
+                        android:drawablePadding="8dp" android:text="@string/export_config" />
+                </LinearLayout>
+                <LinearLayout android:id="@+id/profilesSection" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp" android:paddingHorizontal="24dp" android:paddingBottom="12dp" android:gravity="center_vertical">
+                    <TextView android:id="@+id/profileCount" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                        android:textColor="@color/ink" android:textStyle="bold" android:textSize="14sp" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="@string/profiles_sort_hint" android:textColor="@color/muted" android:textSize="12sp" />
+                </LinearLayout>
+                <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+                    <androidx.recyclerview.widget.RecyclerView android:id="@+id/profilesList" android:layout_width="match_parent"
+                        android:layout_height="match_parent" android:paddingHorizontal="20dp"
+                        android:paddingBottom="100dp" android:clipToPadding="false" android:scrollbars="vertical" />
+                    <ScrollView android:id="@+id/emptyProfiles" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:orientation="vertical" android:gravity="center" android:paddingHorizontal="32dp" android:paddingVertical="28dp">
+                            <ImageView android:layout_width="72dp" android:layout_height="72dp" android:background="@drawable/bg_config_soft"
+                                android:padding="16dp" android:src="@drawable/ic_profiles" android:importantForAccessibility="no" />
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="24dp"
+                                android:text="@string/empty_profiles" android:textSize="21sp" android:textStyle="bold" android:textColor="@color/ink" android:gravity="center" />
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp"
+                                android:text="@string/profiles_empty_note" android:textSize="14sp" android:textColor="@color/muted" android:gravity="center" android:lineSpacingExtra="4dp" />
+                            <Button android:id="@+id/emptyAddButton" style="@style/ConfigPrimary" android:layout_width="match_parent" android:layout_height="54dp"
+                                android:layout_marginTop="28dp" android:text="@string/add_profile" />
+                            <Button android:id="@+id/emptyImportButton" style="@style/ConfigAction" android:layout_width="match_parent"
+                                android:layout_height="52dp" android:layout_marginTop="6dp" android:text="@string/profiles_empty_import" />
+                        </LinearLayout>
+                    </ScrollView>
+                </FrameLayout>
+                <TextView android:id="@+id/versionLabel" android:layout_width="match_parent" android:layout_height="44dp"
+                    android:paddingHorizontal="24dp" android:gravity="center_vertical" android:textColor="@color/muted" android:textSize="11sp" />
             </LinearLayout>
-            <ImageButton android:id="@+id/addButton" android:layout_width="56dp" android:layout_height="56dp"
+            <Button android:id="@+id/addButton" style="@style/ConfigPrimary" android:layout_width="wrap_content" android:layout_height="56dp"
                 android:layout_gravity="bottom|end" android:layout_marginEnd="24dp" android:layout_marginBottom="24dp"
-                android:src="@drawable/ic_add" android:padding="16dp" android:background="@drawable/bg_menu_button"
-                android:contentDescription="@string/add_profile" android:elevation="8dp" />
+                android:drawableStart="@drawable/ic_add" android:drawablePadding="8dp" android:text="@string/add_profile"
+                android:paddingHorizontal="20dp" android:elevation="6dp" />
         </FrameLayout>
 
         <LinearLayout android:id="@+id/statusPanel" android:layout_width="match_parent"
@@ -172,10 +198,10 @@
         </LinearLayout>
         <FrameLayout android:id="@+id/menuLayer" android:layout_width="match_parent" android:layout_height="match_parent"
             android:visibility="gone" android:clipChildren="true" android:clipToPadding="true">
-            <com.lightboat.app.EdgeMenuButton android:id="@+id/edgeMenuButton" android:layout_width="56dp"
-                android:layout_height="56dp" android:src="@drawable/ic_menu" android:padding="16dp"
+            <com.lightboat.app.EdgeMenuButton android:id="@+id/edgeMenuButton" android:layout_width="48dp"
+                android:layout_height="48dp" android:src="@drawable/ic_menu" android:padding="13dp"
                 android:background="@drawable/bg_menu_button" android:contentDescription="@string/browser_menu"
-                android:elevation="8dp" />
+                android:elevation="0dp" />
         </FrameLayout>
     </FrameLayout>
 </LinearLayout>

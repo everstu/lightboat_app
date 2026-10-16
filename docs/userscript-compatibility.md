@@ -17,12 +17,12 @@
 | `@run-at document-idle` | DOMContentLoaded 后排队执行；带用户脚本头但未指定 run-at 的默认值 |
 | 无 `==UserScript==` 头 | 保留普通 JS 的 document-start 原文执行行为 |
 | `@require` | 相对/绝对 HTTP(S) 地址，按声明顺序预下载并在主体之前执行，最多 16 项 |
-| `@resource 名称 URL` | 预下载文本/二进制，最多 32 项；供资源 API 使用 |
+| `@resource 名称 URL` | 预下载文本/二进制，最多 32 项；供资源 API 使用。下载失败会记录资源名和原因，主体脚本仍继续运行；资源 API 返回空内容并记录警告 |
 | 资源完整性 | require/resource URL 可附 `#sha256=...`、`#sha384=...`、`#sha512=...`，支持十六进制和 base64 校验值；其它格式报错 |
 | `@grant` | 只向脚本提供明确列出的 API；`none` 只提供 `GM_info`，省略 grant 为无授权 |
 | `@connect` | 跨域 GM 请求授权；支持域名及其子域、IP、`self`、`*`，同源请求无需额外 connect |
 
-预下载每项资源最多 1 MiB，依赖/资源合计最多 8 MiB；每次依赖准备最多 30 秒。依赖失败或完整性不符时显示脚本准备失败，不提前打开目标网页。普通浏览器 fetch 跨域重定向受 CORS 约束。
+预下载每项资源最多 1 MiB，依赖/资源合计最多 8 MiB；每次依赖准备最多 30 秒。`@require` 下载失败或完整性校验失败时显示脚本准备失败，不提前打开目标网页；命名 `@resource` 下载失败时保留明确错误并继续主体脚本，资源完整性校验失败不会把错误内容交给脚本。普通浏览器 fetch 跨域重定向受 CORS 约束。
 
 所有脚本运行于页面 JS 环境，授予接口通过函数参数限定到该脚本。`unsafeWindow` 授权后指向页面 window。**不具备 Tampermonkey 扩展隔离世界的安全 sandbox**，不支持特殊 `@sandbox`、`@run-in`、`@webRequest`；这些指令会记录警告。只加载可信脚本。脚本顶层变量处于运行器的函数范围，不会自动成为 window 属性。
 
@@ -46,7 +46,7 @@
 | 日志 | `GM_log` | `GM.log` |
 | 应用内文字提示 | `GM_notification` | `GM.notification` |
 
-GM 值按配置 ID + namespace + name 存入应用私有目录，与网页 localStorage 分离。支持 JSON 可序列化值和 undefined；每个脚本最多 1 MiB，键最多 512 字符。旧式 set/delete 立即修改 JS 内存快照，再异步原子落盘；现代 API 可 await 落盘完成。监听回调传入 `(key, oldValue, newValue, remote)`，remote 表示当前同脚本的其它 frame；不支持跨独立应用进程同步。导出配置不包含 GM 值；修改脚本名称/namespace 或换配置 ID 会使用新的存储空间。
+GM 值按配置 ID + namespace + name 存入应用私有目录，与网页 localStorage 分离。支持 JSON 可序列化值和 undefined；每个脚本最多 1 MiB，键最多 512 字符。磁盘读取及原子写入使用应用内共用的串行后台队列，刷新配置后也保持先写后读；等待队列最多 64 项，超出时明确报错。旧式 set/delete 立即修改 JS 内存快照，再异步原子落盘；现代 API 可 await 落盘完成。损坏存储使用空快照继续启动，最多保留一份 1 MiB 内的原始副本并记录诊断；不会把存储内容写入日志。监听回调传入 `(key, oldValue, newValue, remote)`，remote 表示当前同脚本的其它 frame；旧的远程通知不会覆盖尚未确认的新本地写入。不支持跨独立应用进程同步。导出配置不包含 GM 值；修改脚本名称/namespace 或换配置 ID 会使用新的存储空间。
 
 样式/元素在 head 尚未创建时也可排队插入。资源 URL 返回 data URL，适用于 CSS/图片；不同浏览器 CSP 可能限制 data URL。菜单注册返回 ID，支持 options.id 更新；命令显示在悬浮菜单的 **脚本命令** 中；不实现桌面 accessKey 快捷键等选项。文本复制需要近期用户点击/键盘操作或点选原生脚本命令，最多 64 Ki 字符；不支持 HTML 或图片写入。
 
@@ -60,7 +60,7 @@ notification 目前是原生应用内文字 Toast，拒绝点击回调、图片�
 
 支持 onloadstart/onprogress/onreadystatechange/onload/onerror/onabort/ontimeout；现代 Promise 带 `.abort()`。HTTP 4xx/5xx 作为正常响应返回，网络/TLS/超时进入对应错误路径。进度和 readyState 为应用合成状态，不保证与桌面油猴事件频率一致。
 
-不支持 stream、同步请求、FormData/Blob 正文、cookiePartition、显式 cookie/user/password、fetch 特殊行为、部分受保护请求头。请求正文最多 1 MiB，响应最多 4 MiB，同时最多 16 个请求，总超时上限 120 秒。Cookie 行为不是独立的浏览器请求隔离环境。
+不支持 stream、同步请求、FormData/Blob 正文、cookiePartition、显式 cookie/user/password、fetch 特殊行为、部分受保护请求头。请求正文最多 1 MiB，响应最多 4 MiB，同时最多 16 个请求。总超时包含排队时间，默认 30 秒；`timeout: 0` 或超过上限时按 120 秒处理。超时和主动 abort 会立即结束脚本侧请求、取消原生请求，并忽略迟到响应。Cookie 行为不是独立的浏览器请求隔离环境。
 
 ## 未实现功能与诊断
 

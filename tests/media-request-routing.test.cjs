@@ -86,7 +86,7 @@ test('Routes direct HTTP media while preserving the page-visible URL', () => {
   const video = h.attach(new h.HTMLMediaElement());
   video.src = 'https://cdn.example/master.m3u8?token=a';
   h.flush();
-  assert.match(video.attrs.src, /^http:\/\/127\.0\.0\.1:43210\/session\/media\?/);
+  assert.match(video.attrs.src, /^http:\/\/127\.0\.0\.1:43210\/session\/media\.m3u8\?/);
   assert.equal(video.src, 'https://cdn.example/master.m3u8?token=a');
   assert.equal(video.currentSrc, 'https://cdn.example/master.m3u8?token=a');
   assert.equal(video.getAttribute('src'), 'https://cdn.example/master.m3u8?token=a');
@@ -101,6 +101,28 @@ test('Rewrites parser-added HTTP sources once and drains its own mutation', () =
   h.flush();
   assert.match(node.attrs.src, /^http:\/\/127\.0\.0\.1/);
   assert.equal(node.writes, 1);
+});
+
+test('Explicit HLS MIME selects a typed route without rewriting it again', () => {
+  const h = harness();
+  const source = new h.HTMLSourceElement();
+  source.attrs.type = 'application/x-mpegURL';
+  source.attrs.src = 'https://cdn.example/signed-source?token=1';
+  h.attach(source); h.flush();
+  assert.ok(source.attrs.src.startsWith(proxy + '.m3u8?'));
+  assert.equal(source.getAttribute('src'), 'https://cdn.example/signed-source?token=1');
+  h.windowListeners.get('pageshow')({ persisted: true }); h.flush();
+  assert.equal(source.writes, 1);
+});
+
+test('A typed HLS redirect remains transparent through currentSrc', () => {
+  const h = harness();
+  const video = h.attach(new h.HTMLMediaElement());
+  video.src = 'https://cdn.example/signed-source'; h.flush();
+  video.attrs.src = proxy + '.m3u8?url=' + encodeURIComponent('https://cdn.example/signed-source');
+  assert.equal(video.currentSrc, 'https://cdn.example/signed-source');
+  h.windowListeners.get('pageshow')({ persisted: true }); h.flush();
+  assert.equal(video.writes, 1);
 });
 
 test('Blob MediaSource assignments never cause repeated source writes', () => {

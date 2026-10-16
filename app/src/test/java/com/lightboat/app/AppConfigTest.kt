@@ -32,6 +32,16 @@ class AppConfigTest {
         assertEquals("http://127.0.0.1:8080", AppConfig.normalizeUrl("http://127.0.0.1:8080"))
     }
 
+    @Test fun unicodeUrlLimitsApplyAfterEncodingSoSavedProfilesRemainReadable() {
+        val short = AppConfig.normalizeUrl("https://example.com/路径?q=测试#片段")
+        val config = AppConfig.EMPTY.upsert(first.copy(url = short))
+        assertEquals(config, ConfigCodec.decode(ConfigCodec.encode(config)))
+        assertEquals(short, AppConfig.normalizeUrl(short))
+        assertThrows(IllegalArgumentException::class.java) {
+            AppConfig.normalizeUrl("https://example.com/" + "路".repeat(1000))
+        }
+    }
+
     @Test fun rejectsInvalidOrUnsupportedUrls() {
         listOf("", "example.com", "javascript:alert(1)", "file:///tmp/a", "https://",
             "https://user:pass@example.com", "https://example.com:65536", "https://bad host/a").forEach {
@@ -41,6 +51,26 @@ class AppConfigTest {
 
     @Test fun emptyConfigRoundTrips() {
         assertEquals(AppConfig.EMPTY, ConfigCodec.decode(ConfigCodec.encode(AppConfig.EMPTY)))
+    }
+
+    @Test fun profilesWithoutScriptsRoundTrip() {
+        val profile = first.copy(scriptUrl = "")
+        val config = AppConfig.EMPTY.upsert(profile)
+        assertEquals(config, ConfigCodec.decode(ConfigCodec.encode(config)))
+    }
+
+    @Test fun missingNullOrBlankScriptAddressMeansNoInjectedScript() {
+        listOf("", ",\"scriptUrl\":null", ",\"scriptUrl\":\"\"", ",\"scriptUrl\":\"   \"").forEach { optionalField ->
+            val json = """{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"普通网页","url":"https://example.com"$optionalField}]}"""
+            assertEquals("", ConfigCodec.decode(json).lastProfile?.scriptUrl)
+        }
+    }
+
+    @Test fun aNonEmptyScriptAddressStillRequiresAValidHttpUrl() {
+        listOf("javascript:alert(1)", "file:///tmp/script.js", "not-a-url").forEach { script ->
+            val config = AppConfig.EMPTY.upsert(first.copy(scriptUrl = script))
+            assertThrows(IllegalArgumentException::class.java) { ConfigCodec.decode(ConfigCodec.encode(config)) }
+        }
     }
 
     @Test fun customUserAgentRoundTripsWithoutChangingSelection() {

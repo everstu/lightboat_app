@@ -3,6 +3,7 @@ package com.lightboat.app
 import fi.iki.elonen.NanoHTTPD
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.io.IOException
 import java.net.URI
 import java.net.URLEncoder
 import java.util.UUID
@@ -12,6 +13,7 @@ import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import okio.BufferedSource
+import okio.ByteString.Companion.encodeUtf8
 
 /** Proxy for direct media element sources only; it never intercepts browser fetch/XHR. */
 internal class MediaRequestProxy(
@@ -23,6 +25,8 @@ internal class MediaRequestProxy(
     private val workers = ThreadPoolExecutor(0, 24, 30, TimeUnit.SECONDS, SynchronousQueue<Runnable>())
     private val clients = ConcurrentHashMap.newKeySet<ClientHandler>()
     private val uriAttribute = Regex("URI=\"([^\"]+)\"")
+    private val hlsHeader = "#EXTM3U".encodeUtf8()
+    private val utf8Bom = "\uFEFF".encodeUtf8()
     @Volatile private var closed = false
 
     init {
@@ -42,7 +46,10 @@ internal class MediaRequestProxy(
 
     override fun start() = start(SOCKET_READ_TIMEOUT, true)
     fun close() { closed = true; stop(); workers.shutdownNow() }
-    fun url(remote: String, referer: String): String = "$baseUrl?url=${encode(remote)}&ref=${encode(referer)}"
+    fun url(remote: String, referer: String): String {
+        val route = if (URI(remote).path.orEmpty().endsWith(".m3u8", true)) "$baseUrl.m3u8" else baseUrl
+        return "$route?url=${encode(remote)}&ref=${encode(referer)}"
+    }
 
     private fun rewriteLine(line: String, finalUrl: String, referer: String): String =
         if (line.startsWith('#')) uriAttribute.replace(line) { match ->
@@ -55,7 +62,7 @@ internal class MediaRequestProxy(
     }
 
     override fun serve(session: IHTTPSession): Response {
-        if (session.uri != "/$token/media" || closed) return newFixedLengthResponse(Response.Status.FORBIDDEN, "text/plain", "Media session ended")
+        if (session.uri !in setOf("/$token/media", "/$token/media.m3u8") || closed) return newFixedLengthResponse(Response.Status.FORBIDDEN, "text/plain", "Media session ended")
         if (session.method == Method.OPTIONS) return cors(session, newFixedLengthResponse(Response.Status.NO_CONTENT, "text/plain", ""))
         if (session.method !in setOf(Method.GET, Method.HEAD)) {
             return newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, "text/plain", "GET/HEAD only")
@@ -76,7 +83,7 @@ internal class MediaRequestProxy(
             }
             // Rewritten manifests are a new representation: upstream byte
             // offsets and validators cannot describe the downstream text.
-            if (remoteUri.path.orEmpty().endsWith(".m3u8", true)) {
+            if (session.uri == "/$token/media.m3u8" || remoteUri.path.orEmpty().endsWith(".m3u8", true)) {
                 stripManifestValidators(headers)
             }
             if (referer.length <= 8192 && runCatching { URI(referer).scheme in setOf("http", "https") }.getOrDefault(false)) {
@@ -85,7 +92,11 @@ internal class MediaRequestProxy(
             session.headers["origin"]?.takeIf { it != "null" && !it.startsWith("http://127.0.0.1:") }?.let { headers["Origin"] = it }
             DebugLog.event("media-proxy", "${session.method.name} playerUA=${session.headers["user-agent"].orEmpty().take(300)} url=${DebugLog.safeUrl(remote)}")
             val initial = network.execute(remote, session.method.name, headers)
-            val upstream = if (isPlaylist(initial, remoteUri) && initial.code in setOf(206, 304)) {
+            val manifestResource = try { session.uri == "/$token/media.m3u8" || isPlaylist(initial, remoteUri) } catch (error: Exception) {
+                initial.close()
+                throw error
+            }
+            val upstream = if (manifestResource && initial.code in setOf(206, 304)) {
                 // Extensionless/redirected HLS can only be recognized after
                 // response headers. Retry once for a complete manifest body.
                 initial.close()
@@ -100,16 +111,27 @@ internal class MediaRequestProxy(
                 }
                 val mime = upstream.header("Content-Type").orEmpty().substringBefore(';').ifBlank { "application/octet-stream" }
                 val body = upstream.body
-                val manifestResource = isPlaylist(upstream, remoteUri)
                 val manifest = session.method == Method.GET && manifestResource
                 if (manifestResource) require(upstream.code !in setOf(206, 304)) { "Upstream did not return a complete HLS manifest" }
                 val playlist = upstream.isSuccessful && manifest
+                if (playlist && session.uri == "/$token/media") {
+                    upstream.close()
+                    // Android selects its HLS parser by URL before inspecting the
+                    // body. A typed redirect also covers signed, extensionless URLs.
+                    return cors(session, newFixedLengthResponse(object : Response.IStatus {
+                        override fun getRequestStatus() = 302
+                        override fun getDescription() = "302 Found"
+                    }, "text/plain", "").apply {
+                        addHeader("Location", "$baseUrl.m3u8?url=${encode(remote)}&ref=${encode(referer)}")
+                        addHeader("Cache-Control", "no-store")
+                    })
+                }
                 val result = when {
                     session.method == Method.HEAD -> {
                         val empty = ByteArrayInputStream(ByteArray(0))
                         // A rewritten manifest has no known length until its
                         // GET body is transformed. Do not advertise upstream offsets.
-                        val head = if (manifestResource) newChunkedResponse(status, mime, empty)
+                        val head = if (manifestResource) newChunkedResponse(status, "application/vnd.apple.mpegurl", empty)
                             else newFixedLengthResponse(status, mime, empty,
                                 upstream.header("Content-Length")?.toLongOrNull()?.coerceAtLeast(0) ?: 0L)
                         upstream.close()
@@ -117,12 +139,9 @@ internal class MediaRequestProxy(
                     }
                     playlist -> {
                         val source = requireNotNull(body) { "Empty playlist response" }.source()
-                        val first = try { source.readUtf8LineStrict(512).removePrefix("\uFEFF") }
-                            catch (_: java.io.EOFException) { throw java.io.IOException("Missing or invalid HLS header") }
-                        require(first.trim() == "#EXTM3U") { "Upstream did not return an HLS playlist (type=$mime)" }
-                        DebugLog.event("media-manifest", "HLS accepted url=${DebugLog.safeUrl(upstream.request.url.toString())}")
-                        val stream = HlsPlaylistStream(source, first,
+                        val stream = HlsPlaylistStream(source,
                             { line -> rewriteLine(line, upstream.request.url.toString(), referer) }, { upstream.close() })
+                        DebugLog.event("media-manifest", "HLS accepted url=${DebugLog.safeUrl(upstream.request.url.toString())}")
                         newChunkedResponse(Response.Status.OK, "application/vnd.apple.mpegurl", stream)
                     }
                     else -> {
@@ -169,10 +188,20 @@ internal class MediaRequestProxy(
         listOf("range", "if-range", "if-none-match", "if-modified-since").forEach { headers.remove(it) }
     }
 
-    private fun isPlaylist(response: okhttp3.Response, uri: URI): Boolean =
-        uri.path.orEmpty().endsWith(".m3u8", true) || response.request.url.encodedPath.endsWith(".m3u8", true) ||
+    private fun isPlaylist(response: okhttp3.Response, uri: URI): Boolean {
+        if (uri.path.orEmpty().endsWith(".m3u8", true) || response.request.url.encodedPath.endsWith(".m3u8", true) ||
             response.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase() in
-                setOf("application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl")
+                setOf("application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl")) return true
+        if (!response.isSuccessful || response.request.method != "GET") return false
+        // Some CDNs serve signed, extensionless HLS as text/plain or binary.
+        // Inspect only the header and leave all original media bytes buffered.
+        val source = response.body?.source() ?: return false
+        if (!source.request(hlsHeader.size.toLong())) return false
+        val offset = if (source.buffer.rangeEquals(0, utf8Bom)) utf8Bom.size.toLong() else 0L
+        if (!source.request(offset + hlsHeader.size) || !source.buffer.rangeEquals(offset, hlsHeader)) return false
+        return !source.request(offset + hlsHeader.size + 1) ||
+            source.buffer[offset + hlsHeader.size].toInt() in setOf(10, 13)
+    }
 
     private fun isLoopback(host: String): Boolean = host == "localhost" || host == "::1" || host.startsWith("127.") ||
         runCatching { java.net.InetAddress.getByName(host).isLoopbackAddress }.getOrDefault(false)
@@ -181,15 +210,33 @@ internal class MediaRequestProxy(
 /** Emits rewritten complete HLS lines promptly instead of buffering the entire response. */
 internal class HlsPlaylistStream(
     private val source: BufferedSource,
-    first: String,
     private val rewrite: (String) -> String,
     private val release: () -> Unit,
 ) : InputStream() {
     private val limit = 2L * 1024 * 1024
-    private var consumed = first.toByteArray(Charsets.UTF_8).size.toLong() + 1
-    private var pending = (rewrite(first) + "\n").toByteArray(Charsets.UTF_8)
+    private var consumed = 0L
+    private var pending = ByteArray(0)
     private var offset = 0
     private var closed = false
+
+    init {
+        try {
+            val first = readLine(512)?.removePrefix("\uFEFF")
+            if (first?.trim() != "#EXTM3U") throw IOException("Missing or invalid HLS header")
+            pending = (rewrite(first) + "\n").toByteArray(Charsets.UTF_8)
+        } catch (error: Exception) { close(); throw error }
+    }
+
+    private fun readLine(maxBytes: Long = limit - consumed): String? {
+        if (source.exhausted()) return null
+        val newline = source.indexOf(10.toByte(), 0, maxBytes)
+        val count = if (newline >= 0) newline + 1 else {
+            if (source.request(maxBytes + 1)) throw IOException("HLS playlist exceeds its byte limit")
+            source.buffer.size
+        }
+        consumed += count
+        return source.readUtf8(count).removeSuffix("\n").removeSuffix("\r")
+    }
 
     override fun read(): Int {
         val one = ByteArray(1)
@@ -202,15 +249,7 @@ internal class HlsPlaylistStream(
         if (closed) return -1
         if (this.offset == pending.size) {
             try {
-                if (source.exhausted()) { close(); return -1 }
-                val remaining = limit - consumed
-                require(remaining >= 0) { "HLS playlist exceeds 2 MiB" }
-                val line = try { source.readUtf8LineStrict(remaining) } catch (_: java.io.EOFException) {
-                    if (source.buffer.size > remaining) throw java.io.IOException("HLS line exceeds remaining manifest limit")
-                    source.readUtf8()
-                }
-                consumed += line.toByteArray(Charsets.UTF_8).size + 1
-                require(consumed <= limit) { "HLS playlist exceeds 2 MiB" }
+                val line = readLine() ?: run { close(); return -1 }
                 pending = (rewrite(line) + "\n").toByteArray(Charsets.UTF_8)
                 this.offset = 0
             } catch (error: Exception) {

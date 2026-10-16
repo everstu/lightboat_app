@@ -20,8 +20,10 @@ object ConfigCodec {
             )
             val platform = if (item.has("platform")) BrowserPlatform.parse(item.getString("platform"))
                 else MobileUserAgent.detect(userAgent)
+            val scriptUrl = if (!item.has("scriptUrl") || item.isNull("scriptUrl")) ""
+                else AppConfig.normalizeOptionalUrl(item.getString("scriptUrl"))
             Profile(id, name, AppConfig.normalizeUrl(item.getString("url")),
-                AppConfig.normalizeUrl(item.getString("scriptUrl")), userAgent, platform)
+                scriptUrl, userAgent, platform)
         }
         require(profiles.map { it.id }.distinct().size == profiles.size) { "配置 ID 不能重复" }
         require(root.has("lastProfileId")) { "缺少 lastProfileId" }

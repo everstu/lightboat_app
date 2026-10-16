@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.appcompat.widget.PopupMenu
 import androidx.recyclerview.widget.RecyclerView
 import com.lightboat.app.databinding.ItemProfileBinding
 
@@ -44,20 +45,31 @@ class ProfileAdapter(
         val row = holder.binding
         val context = row.root.context
         row.profileName.text = profile.name
-        row.profileUrl.text = profile.url
-        row.profileBadge.text = listOfNotNull(
-            context.getString(when (profile.platform) {
+        row.root.isActivated = profile.id == currentId
+        row.profileUrl.text = profile.url.substringBefore('?').substringBefore('#')
+        row.profileScript.text = if (profile.scriptUrl.isBlank()) context.getString(R.string.profile_script_none)
+        else context.getString(R.string.profile_script_host,
+            profile.scriptUrl.substringBefore('?').substringBefore('#'))
+        row.profileBadge.text = context.getString(when (profile.platform) {
                 BrowserPlatform.APPLE -> R.string.platform_apple
                 BrowserPlatform.ANDROID -> R.string.platform_android
                 BrowserPlatform.WINDOWS -> R.string.platform_windows
-            }),
-            context.getString(R.string.last_profile).takeIf { profile.id == lastId },
-            context.getString(R.string.current_profile).takeIf { profile.id == currentId }
-        ).joinToString(" · ")
-        row.profileBadge.visibility = if (row.profileBadge.text.isEmpty()) View.GONE else View.VISIBLE
+            })
+        row.profileState.text = when (profile.id) {
+            currentId -> context.getString(R.string.current_profile)
+            lastId -> context.getString(R.string.last_profile)
+            else -> ""
+        }
+        row.profileState.visibility = if (row.profileState.text.isEmpty()) View.GONE else View.VISIBLE
+        row.openProfile.contentDescription = context.getString(R.string.profile_open_description, profile.name)
+        row.editProfile.contentDescription = context.getString(R.string.profile_edit_description, profile.name)
         row.openProfile.setOnClickListener { open(profile) }
         row.editProfile.setOnClickListener { edit(profile) }
-        row.deleteProfile.setOnClickListener { delete(profile) }
+        row.profileMore.setOnClickListener {
+            PopupMenu(context, row.profileMore).apply {
+                menu.add(R.string.delete).setOnMenuItemClickListener { delete(profile); true }
+            }.show()
+        }
         row.dragHandle.setOnLongClickListener {
             if (holder.bindingAdapterPosition != RecyclerView.NO_POSITION && profiles.size > 1) {
                 startDrag(holder)

@@ -1,6 +1,7 @@
 (() => {
   'use strict';
   const base = __LIGHTBOAT_MEDIA_PROXY__;
+  const isProxy = value => value.startsWith(base + '?') || value.startsWith(base + '.m3u8?');
   const originals = new WeakMap();
   const getAttribute = Element.prototype.getAttribute;
   const setAttribute = Element.prototype.setAttribute;
@@ -12,7 +13,7 @@
     if (!text.trim()) { originals.delete(node); return text; }
     let url;
     try { url = new URL(text, document.baseURI); } catch (_) { originals.delete(node); return text; }
-    if (url.href.startsWith(base + '?')) return text;
+    if (isProxy(url.href)) return text;
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
       originals.delete(node); return text;
     }
@@ -24,7 +25,9 @@
     else if (page.origin !== url.origin && ['same-origin'].includes(policy)) ref = '';
     else if (['origin', 'strict-origin'].includes(policy) ||
       (page.origin !== url.origin && ['origin-when-cross-origin', 'strict-origin-when-cross-origin'].includes(policy))) ref = page.origin + '/';
-    return base + '?url=' + encodeURIComponent(url.href) + '&ref=' + encodeURIComponent(ref);
+    const type = (getAttribute.call(node, 'type') || '').split(';')[0].trim().toLowerCase();
+    const hls = /\.m3u8$/i.test(url.pathname) || ['application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl', 'audio/x-mpegurl'].includes(type);
+    return base + (hls ? '.m3u8' : '') + '?url=' + encodeURIComponent(url.href) + '&ref=' + encodeURIComponent(ref);
   }
   function wrapSrc(prototype) {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, 'src');
@@ -50,14 +53,14 @@
   const current = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentSrc');
   if (current?.get) Object.defineProperty(HTMLMediaElement.prototype, 'currentSrc', { ...current, get() {
     const value = current.get.call(this);
-    if (!value.startsWith(base + '?')) return value;
+    if (!isProxy(value)) return value;
     return new URL(value).searchParams.get('url') || value;
   } });
   function fix(node) {
     if (eligible(node)) {
       const src = getAttribute.call(node, 'src');
       if (!src) originals.delete(node);
-      else if (!src.startsWith(base + '?')) {
+      else if (!isProxy(src)) {
         const routed = route(node, src);
         // A same-value src write still queues an attribute mutation and can
         // restart MediaSource. Never rewrite blob/data/unsupported sources.

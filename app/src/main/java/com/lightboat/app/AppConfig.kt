@@ -68,7 +68,14 @@ data class AppConfig(val lastProfileId: String?, val profiles: List<Profile>) {
                 (uri.port == -1 || uri.port in 1..65535)) {
                 "地址无效，请检查域名、端口和格式"
             }
-            return uri.toASCIIString()
+            val normalized = uri.toASCIIString()
+            require(normalized.length <= 8192) { "网址过长，请缩短路径或参数后重试" }
+            return normalized
+        }
+
+        fun normalizeOptionalUrl(value: String): String {
+            val text = value.trim()
+            return if (text.isEmpty()) "" else normalizeUrl(text)
         }
     }
 }

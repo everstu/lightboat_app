@@ -10,4 +10,6 @@
     <color name="log_badge">#E3EFE7</color>
     <color name="log_warning">#966217</color>
     <color name="log_paused_badge">#F8EDD8</color>
+    <color name="config_soft">#E8EFE8</color>
+    <color name="config_selected">#EEF5EF</color>
 </resources>

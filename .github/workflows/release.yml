@@ -45,6 +45,10 @@ jobs:
           ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
       - name: Verify fixed debug signing certificate
         run: python3 scripts/verify_debug_signature.py
+      - name: Verify release tag matches APK version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/verify_release_version.py --tag "$RELEASE_TAG"
       - name: Prepare release attachment
         env:
           RELEASE_TAG: ${{ github.ref_name }}

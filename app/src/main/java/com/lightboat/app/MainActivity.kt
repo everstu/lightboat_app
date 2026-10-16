@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
@@ -54,6 +55,7 @@ import com.lightboat.app.databinding.DialogBrowserMenuBinding
 import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import java.net.URI
 import java.util.UUID
 import java.util.concurrent.Executors
 import org.json.JSONObject
@@ -113,7 +115,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val importFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importConfig(uri)
+        if (uri != null) {
+            // The document picker can stop the original dialog and its worker. Recreate
+            // the import session so the returned URI always uses a live reader.
+            showConfigImport(uri)
+        }
     }
     private val exportFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val text = exportSnapshot
@@ -180,12 +186,15 @@ class MainActivity : AppCompatActivity() {
         binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchLast() }
         binding.debugLogButton.setOnClickListener { showScriptLogs() }
         binding.addButton.setOnClickListener { showEditor(null) }
+        binding.emptyAddButton.setOnClickListener { showEditor(null) }
+        binding.emptyImportButton.setOnClickListener { showConfigImport() }
         binding.saveButton.setOnClickListener { saveEditor(false) }
         binding.saveOpenButton.setOnClickListener { saveEditor(true) }
         binding.cancelButton.setOnClickListener { showProfiles() }
         binding.returnButton.setOnClickListener { returnToPage() }
-        binding.importButton.setOnClickListener { importFile.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }
+        binding.importButton.setOnClickListener { showConfigImport() }
         binding.exportButton.setOnClickListener {
+            commitProfileOrder()
             exportSnapshot = ConfigCodec.encode(config)
             exportFile.launch("lightboat-config.json")
         }
@@ -256,9 +265,9 @@ class MainActivity : AppCompatActivity() {
         binding.statusPanel.visibility = if (next == Screen.LOADING || next == Screen.ERROR) View.VISIBLE else View.GONE
         binding.settingsButton.visibility = if (next in listOf(Screen.BROWSER, Screen.LOADING, Screen.ERROR)) View.VISIBLE else View.GONE
         binding.refreshButton.visibility = if (next == Screen.BROWSER) View.VISIBLE else View.GONE
-        binding.titleBar.visibility = if (next == Screen.BROWSER) View.GONE else View.VISIBLE
+        binding.titleBar.visibility = if (next == Screen.BROWSER || next == Screen.PROFILES || next == Screen.EDITOR) View.GONE else View.VISIBLE
         binding.menuLayer.visibility = if (next == Screen.BROWSER) View.VISIBLE else View.GONE
-        if (next == Screen.BROWSER) binding.edgeMenuButton.wake()
+        if (next == Screen.BROWSER) binding.edgeMenuButton.dock()
         updateChrome()
     }
 
@@ -287,6 +296,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showNativeDialog(dialog: Dialog) {
+        if (isFinishing || isDestroyed) return
         nativeDialog?.dismiss()
         nativeDialog = dialog
         dialog.setOnDismissListener {
@@ -307,27 +317,38 @@ class MainActivity : AppCompatActivity() {
         if (screen != Screen.BROWSER) return
         binding.edgeMenuButton.wake()
         val menu = DialogBrowserMenuBinding.inflate(layoutInflater)
-        val dialog = Dialog(this)
+        val dialog = object : Dialog(this), ResponsiveDialog {
+            override fun updateLayout() {
+                window?.apply {
+                    setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                    setGravity(Gravity.BOTTOM)
+                    val density = resources.displayMetrics.density
+                    attributes = attributes.apply { y = (12 * density).toInt() }
+                    setLayout(minOf(resources.displayMetrics.widthPixels - (32 * density).toInt(), (560 * density).toInt()),
+                        WindowManager.LayoutParams.WRAP_CONTENT)
+                    addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                    setDimAmount(0.38f)
+                }
+            }
+        }
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         dialog.setContentView(menu.root)
-        menu.menuProfileName.text = currentProfile()?.name ?: getString(R.string.app_name)
+        val profile = currentProfile()
+        menu.menuProfileName.text = profile?.name ?: getString(R.string.app_name)
+        menu.menuProfileHost.text = profile?.let { Uri.parse(it.url).authority }.orEmpty()
+        ViewCompat.setAccessibilityHeading(menu.menuProfileName, true)
         menu.menuSwitch.setOnClickListener { dialog.dismiss(); showProfilePicker() }
         menu.menuScan.setOnClickListener { dialog.dismiss(); startScan(ScanTarget.COPY) }
         menu.menuRefresh.setOnClickListener { dialog.dismiss(); currentProfile()?.let { openProfile(it) } }
         menu.menuSettings.setOnClickListener { dialog.dismiss(); showProfiles() }
         menu.menuScriptLogs.setOnClickListener { dialog.dismiss(); showScriptLogs() }
         menu.menuScriptCommands.isEnabled = userScriptHost?.menus?.isNotEmpty() == true
+        menu.menuScriptCommands.alpha = if (menu.menuScriptCommands.isEnabled) 1f else 0.45f
         menu.menuScriptCommands.setOnClickListener { dialog.dismiss(); showScriptCommands() }
         menu.menuClose.setOnClickListener { dialog.dismiss() }
         dialog.setCanceledOnTouchOutside(true)
         showNativeDialog(dialog)
-        dialog.window?.apply {
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            setGravity(Gravity.BOTTOM)
-            setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
-            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setDimAmount(0.25f)
-        }
+        dialog.updateLayout()
     }
 
     private fun showScriptLogs() {
@@ -345,15 +366,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showProfilePicker() {
-        val profiles = config.profiles
-        val selected = profiles.indexOfFirst { it.id == currentId }
-        val dialog = AlertDialog.Builder(this).setTitle(R.string.switch_configuration)
-            .setSingleChoiceItems(profiles.map { it.name }.toTypedArray(), selected) { picker, index ->
-                picker.dismiss()
-                val profile = profiles[index]
-                openProfile(profile)
-            }.setNegativeButton(R.string.cancel, null).create()
-        showNativeDialog(dialog)
+        if (config.profiles.isEmpty()) { showProfiles(); return }
+        showNativeDialog(ProfileSwitchDialog(this, config.profiles, currentId, ::openProfile))
     }
 
     private fun startScan(target: ScanTarget) {
@@ -418,15 +432,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showProfiles() {
+        commitProfileOrder()
         cancelDownload()
         scriptLoader.close()
         ensureSettingsUi()
         hideKeyboard()
         showScreen(Screen.PROFILES)
         binding.emptyProfiles.visibility = if (config.profiles.isEmpty()) View.VISIBLE else View.GONE
+        binding.profilesSection.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
+        binding.profilesList.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
+        binding.profileCount.text = getString(R.string.profiles_count, config.profiles.size)
         binding.returnButton.visibility = if (pageReady && webView != null) View.VISIBLE else View.GONE
+        binding.exportButton.isEnabled = config.profiles.isNotEmpty()
+        binding.exportButton.alpha = if (binding.exportButton.isEnabled) 1f else 0.4f
+        binding.addButton.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
         binding.addButton.isEnabled = config.profiles.size < AppConfig.MAX_PROFILES
         binding.addButton.alpha = if (binding.addButton.isEnabled) 1f else 0.4f
+        binding.addButton.setText(if (binding.addButton.isEnabled) getString(R.string.add_profile)
+            else getString(R.string.profile_limit, AppConfig.MAX_PROFILES))
         profileOrderDirty = false
         profileAdapter.submit(config, currentId.takeIf { webView != null })
     }
@@ -480,17 +503,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun confirmDeleteProfile(profile: Profile) {
         commitProfileOrder()
-        AlertDialog.Builder(this).setTitle(R.string.delete_title).setMessage(R.string.delete_message)
-            .setNegativeButton(R.string.stay, null)
+        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.delete_title)
+            .setMessage(getString(R.string.delete_message, profile.name))
+            .setNegativeButton(R.string.import_cancel, null)
             .setPositiveButton(R.string.delete) { _, _ ->
                 if (persist(config.remove(profile.id))) {
                     if (currentId == profile.id) { destroyWebView(); currentId = null }
                     showProfiles()
                 }
-            }.show()
+            }.create())
     }
 
     private fun showEditor(profile: Profile?) {
+        if (profile == null && config.profiles.size >= AppConfig.MAX_PROFILES) {
+            toast(getString(R.string.profile_limit, AppConfig.MAX_PROFILES)); return
+        }
         editingId = profile?.id
         showScreen(Screen.EDITOR)
         binding.configTitle.setText(if (profile == null) R.string.setup_title else R.string.edit_profile)
@@ -506,8 +533,9 @@ class MainActivity : AppCompatActivity() {
         binding.userAgentInput.error = null
         binding.saveButton.setText(R.string.save_profile)
         binding.saveOpenButton.setText(R.string.save_open)
-        binding.cancelButton.setText(R.string.back_profiles)
         binding.cancelButton.visibility = View.VISIBLE
+        binding.configPanel.clearFocus()
+        binding.editorScroll.post { binding.editorScroll.scrollTo(0, 0) }
     }
 
     private fun selectPlatform(platform: BrowserPlatform, updateUserAgent: Boolean) {
@@ -526,21 +554,21 @@ class MainActivity : AppCompatActivity() {
             BrowserPlatform.WINDOWS to binding.windowsPlatformButton,
         ).forEach { (item, button) ->
             button.isSelected = item == platform
-            button.alpha = if (item == platform) 1f else 0.55f
+            button.alpha = 1f
         }
     }
 
     private fun saveEditor(openAfterSave: Boolean) {
         val name = binding.nameInput.text.toString().trim()
-        if (name.isBlank()) { binding.nameInput.error = "请填写配置名称"; return }
+        if (name.isBlank()) { binding.nameInput.error = getString(R.string.profile_name_required); binding.nameInput.requestFocus(); return }
         val url = try { AppConfig.normalizeUrl(binding.websiteInput.text.toString()) } catch (error: IllegalArgumentException) {
-            binding.websiteInput.error = error.message; return
+            binding.websiteInput.error = error.message; binding.websiteInput.requestFocus(); return
         }
-        val scriptUrl = try { AppConfig.normalizeUrl(binding.scriptInput.text.toString()) } catch (error: IllegalArgumentException) {
-            binding.scriptInput.error = error.message; return
+        val scriptUrl = try { AppConfig.normalizeOptionalUrl(binding.scriptInput.text.toString()) } catch (error: IllegalArgumentException) {
+            binding.scriptInput.error = error.message; binding.scriptInput.requestFocus(); return
         }
         val userAgent = try { AppConfig.normalizeUserAgent(binding.userAgentInput.text.toString()) } catch (error: IllegalArgumentException) {
-            binding.userAgentInput.error = error.message; return
+            binding.userAgentInput.error = error.message; binding.userAgentInput.requestFocus(); return
         }
         val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent, editingPlatform)
         val next = try {
@@ -550,7 +578,10 @@ class MainActivity : AppCompatActivity() {
         }
         if (persist(next)) {
             hideKeyboard()
-            if (openAfterSave) openProfile(profile) else showProfiles()
+            if (openAfterSave) openProfile(profile) else {
+                showProfiles()
+                toast(getString(R.string.profile_saved))
+            }
         }
     }
 
@@ -583,6 +614,22 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val request = generation
+        if (profile.scriptUrl.isBlank()) {
+            DebugLog.event("script", "skipped: no script URL")
+            binding.root.post {
+                if (!isDestroyed && request == generation && navigationRequest == navigationGeneration) {
+                    try {
+                        prepareMainWebView(profile)
+                        createWebView(profile, nativeGuardScript, null, navigationRequest)
+                    } catch (error: Exception) {
+                        DebugLog.event("webview", "create failed ${error.message.orEmpty().take(240)}")
+                        destroyWebView()
+                        showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
+                    }
+                }
+            }
+            return
+        }
         try {
             scriptLoader.load(profile.scriptUrl, profile.userAgent, profile.platform) { result ->
                 DebugLog.event("script", "load result=${if (result.isSuccess) "success" else "failure:${result.exceptionOrNull()?.message.orEmpty().take(180)}"} url=${DebugLog.safeUrl(profile.scriptUrl)}")
@@ -637,13 +684,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createWebView(profile: Profile, guard: String, bundle: ScriptBundle, navigationRequest: Long) {
+    private fun createWebView(profile: Profile, guard: String, bundle: ScriptBundle?, navigationRequest: Long) {
         DebugLog.event("webview", "create navigation=$navigationRequest url=${DebugLog.safeUrl(profile.url)}")
         val view = webView ?: AppWebView(this).also {
             webView = it
             binding.webContainer.addView(it, android.widget.FrameLayout.LayoutParams(-1, -1))
         }
         fun isCurrentNavigation() = view === webView && navigationRequest == navigationGeneration
+        var mainFrameUrl = profile.url
+        fun isMainFrameUrl(address: String): Boolean {
+            val failed = runCatching { URI(address.substringBefore('#')).normalize() }.getOrNull() ?: return false
+            return listOf(mainFrameUrl, view.url).any { candidate ->
+                candidate != null && runCatching { URI(candidate.substringBefore('#')).normalize() == failed }.getOrDefault(false)
+            }
+        }
         val cookies = CookieManager.getInstance()
         val network = MediaRequestClient(profile.userAgent,
             cookies = { cookies.getCookie(it) }, saveCookie = { url, cookie -> cookies.setCookie(url, cookie) })
@@ -654,7 +708,13 @@ class MainActivity : AppCompatActivity() {
         DebugLog.event("network", "media element proxy enabled; Chromium fetch/XHR/MSE unchanged; requestReplay=false")
         view.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                if (isCurrentNavigation()) userScriptHost?.console(message)
+                if (isCurrentNavigation()) {
+                    val host = userScriptHost
+                    if (host != null) host.console(message)
+                    else if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                        DebugLog.event("web-console", "${message.message().take(1000)} (${message.sourceId()}:${message.lineNumber()})")
+                    }
+                }
                 return false
             }
             override fun onShowCustomView(customView: View, callback: WebChromeClient.CustomViewCallback) {
@@ -692,7 +752,10 @@ class MainActivity : AppCompatActivity() {
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (!isCurrentNavigation()) return true
-                if (request.url.scheme?.lowercase() in setOf("http", "https")) return false
+                if (request.url.scheme?.lowercase() in setOf("http", "https")) {
+                    if (request.isForMainFrame) mainFrameUrl = request.url.toString()
+                    return false
+                }
                 if (request.isForMainFrame) toast(getString(R.string.unsafe_link))
                 return true
             }
@@ -700,6 +763,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 if (!isCurrentNavigation()) return
                 DebugLog.event("page", "started ${DebugLog.safeUrl(url)}")
+                if (url != null) mainFrameUrl = url
                 userScriptHost?.resetDocuments()
                 fullscreenPlayer.hide()
                 (view as AppWebView).clearClipboardGesture()
@@ -723,7 +787,10 @@ class MainActivity : AppCompatActivity() {
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 DebugLog.event("page-error", "${request.method} ${DebugLog.safeUrl(request.url.toString())} code=${error.errorCode} ${error.description}")
-                if (request.isForMainFrame && isCurrentNavigation()) failPage(error.description.toString())
+                if (request.isForMainFrame && isCurrentNavigation()) {
+                    failPage(if (error.errorCode == ERROR_FAILED_SSL_HANDSHAKE) getString(R.string.bad_certificate)
+                        else error.description.toString())
+                }
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
@@ -735,7 +802,12 @@ class MainActivity : AppCompatActivity() {
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                 handler.cancel()
-                if (isCurrentNavigation()) failPage(getString(R.string.bad_certificate))
+                if (isCurrentNavigation()) {
+                    // This also reports images/iframes. Some WebViews do not send
+                    // onReceivedError after cancel(), so identify the main request.
+                    DebugLog.event("tls-error", "blocked certificate code=${error.primaryError} url=${DebugLog.safeUrl(error.url)}")
+                    if (isMainFrameUrl(error.url)) failPage(getString(R.string.bad_certificate))
+                }
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -776,8 +848,8 @@ class MainActivity : AppCompatActivity() {
         MobileUserAgent.navigatorIdentityScript(profile.platform, profile.userAgent)?.let { identity ->
             scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, identity, setOf("*"))
         }
-        userScriptHost = UserScriptHost(this, view, profile, bundle)
-        scriptHandlers += userScriptHost!!.install()
+        userScriptHost = bundle?.let { UserScriptHost(this, view, profile, it) }
+        userScriptHost?.let { scriptHandlers += it.install() }
         showLoading(R.string.loading_page)
         view.onResume()
         // Browser requests use WebView identity; direct media uses the profile proxy.
@@ -859,6 +931,15 @@ class MainActivity : AppCompatActivity() {
         pageFailed = true
         pageReady = false
         webView?.stopLoading()
+        val failedView = webView
+        val failedNavigation = navigationGeneration
+        // Leave the WebView callback before destroying its renderer and media session.
+        binding.root.post {
+            if (!isDestroyed && pageFailed && webView === failedView && navigationGeneration == failedNavigation) {
+                destroyWebView()
+                binding.returnButton.visibility = View.GONE
+            }
+        }
         if (screen in listOf(Screen.BROWSER, Screen.LOADING, Screen.ERROR)) {
             showError(R.string.page_error_title, message)
         }
@@ -888,36 +969,22 @@ class MainActivity : AppCompatActivity() {
         updatePageProgress(binding.pageProgress.progress, false)
     }
 
-    private fun importConfig(uri: Uri) {
-        worker.execute {
-            try {
-                val text = (contentResolver.openInputStream(uri) ?: error("无法读取所选文件"))
-                    .bufferedReader(Charsets.UTF_8).use { reader ->
-                        val buffer = CharArray(4096)
-                        val output = StringBuilder()
-                        while (true) {
-                            val size = reader.read(buffer)
-                            if (size == -1) break
-                            require(output.length + size <= 1_048_576) { "配置文件不能超过 1 MiB 字符" }
-                            output.append(buffer, 0, size)
-                        }
-                        output.toString()
-                    }
-                val imported = ConfigCodec.decode(text, defaultUserAgent)
-                runOnUiThread {
-                    if (!isDestroyed) AlertDialog.Builder(this).setTitle(R.string.import_title)
-                        .setMessage(getString(R.string.import_message, imported.profiles.size))
-                        .setNegativeButton(R.string.stay, null)
-                        .setPositiveButton(R.string.import_confirm) { _, _ ->
-                            if (persist(imported)) {
-                                profileOrderDirty = false
-                                cancelDownload(); destroyWebView(); currentId = null
-                                launchLast()
-                            }
-                        }.show()
-                }
-            } catch (error: Exception) { reportOperationError(error) }
+    private fun showConfigImport(file: Uri? = null) {
+        commitProfileOrder()
+        val dialog = ConfigImportDialog(this, defaultUserAgent, { config.profiles.size }, {
+            importFile.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
+        }) { imported ->
+            if (!persist(imported)) false else {
+                profileOrderDirty = false
+                cancelDownload(); destroyWebView(); currentId = null
+                toast(getString(R.string.import_success, imported.profiles.size))
+                launchLast()
+                true
+            }
         }
+        showNativeDialog(dialog)
+        dialog.window?.setBackgroundDrawableResource(R.drawable.bg_config_dialog)
+        file?.let { dialog.readFile(it) }
     }
 
     private fun reportOperationError(error: Exception) {
@@ -925,8 +992,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmExit() {
-        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.exit_title).setMessage(R.string.exit_message)
-            .setNegativeButton(R.string.stay, null).setPositiveButton(R.string.exit) { _, _ -> finish() }.create())
+        showNativeDialog(ExitConfirmationDialog(this, config.lastProfile, screen == Screen.BROWSER) { finish() })
     }
 
     private fun hideKeyboard() {
@@ -1001,6 +1067,11 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         webView?.onResume()
+    }
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        (nativeDialog as? ResponsiveDialog)?.updateLayout()
+        updateChrome()
     }
     override fun onResume() { super.onResume(); updateChrome() }
     override fun onStop() {

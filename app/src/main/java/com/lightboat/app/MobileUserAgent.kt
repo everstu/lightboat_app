@@ -104,5 +104,5 @@ object MobileUserAgent {
     }
 
     private fun chromeVersion(userAgent: String) =
-        Regex("Chrome/([0-9.]+)").find(userAgent)?.groupValues?.get(1) ?: "131.0.0.0"
+        Regex("Chrome/([0-9]+(?:\\.[0-9]+){0,3})(?=$|[\\s;)])").find(userAgent)?.groupValues?.get(1) ?: "131.0.0.0"
 }

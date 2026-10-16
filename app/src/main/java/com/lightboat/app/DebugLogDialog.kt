@@ -140,7 +140,10 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
                     result.onSuccess { update ->
                         readFailed = false
                         applyUpdate(update, rows)
-                    }.onFailure { readFailed = true }
+                    }.onFailure {
+                        readFailed = true
+                        if (entries.itemCount == 0) binding.emptyTitle.setText(R.string.logs_read_failed)
+                    }
                     updateStatus()
                 }
                 if (isCurrentRead && active && !paused && !clearing) main.postDelayed(refresh, 500L)
@@ -150,13 +153,13 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
 
     private fun applyUpdate(update: DebugLog.Update, rows: List<LogEntry>) {
         cursor = update.cursor
+        binding.emptyTitle.setText(R.string.logs_empty)
         if (!update.reset && rows.isEmpty()) return
         val layout = binding.logList.layoutManager as LinearLayoutManager
         val anchor = layout.findFirstVisibleItemPosition()
         val anchorText = entries.at(anchor)?.raw
         val anchorTop = layout.findViewByPosition(anchor)?.let { layout.getDecoratedTop(it) }
         if (update.reset) entries.replace(rows) else entries.append(rows)
-        binding.emptyTitle.setText(R.string.logs_empty)
         binding.emptyLogs.visibility = if (entries.itemCount == 0) View.VISIBLE else View.GONE
         if (followTail) scrollToLatest() else if (update.reset && anchorText != null && anchorTop != null) {
             // File trimming can remove old rows. Keep a surviving row at its old offset,

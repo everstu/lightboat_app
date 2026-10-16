@@ -28,12 +28,12 @@ class ScriptNetwork(private val meta: ScriptMetadata, private val userAgent: Str
         require(requests.size < 16) { "同时请求数量不能超过 16" }
         val target = details.getString("target")
         val requestMethod = details.optString("method", "GET").uppercase()
+        val started = SystemClock.elapsedRealtime()
+        val timeout = details.optLong("timeout", 30000).let { if (it <= 0) 120000 else it.coerceAtMost(120000) }
         DebugLog.event("gm-xhr", "start method=$requestMethod url=${DebugLog.safeUrl(target)} responseType=${details.optString("responseType", "text")}")
         val request = Request()
         require(requests.putIfAbsent(key, request) == null) { "请求 ID 重复" }
         pool.execute task@ {
-            val started = SystemClock.elapsedRealtime()
-            val timeout = details.optLong("timeout", 30000).let { if (it <= 0) 120000 else it.coerceAtMost(120000) }
             var current = target
             var method = requestMethod
             var body: ByteArray? = null

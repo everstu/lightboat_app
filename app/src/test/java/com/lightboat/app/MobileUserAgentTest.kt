@@ -41,4 +41,11 @@ class MobileUserAgentTest {
         assertTrue(script.contains("get: () => undefined"))
         assertEquals(null, MobileUserAgent.navigatorIdentityScript(BrowserPlatform.ANDROID, userAgent))
     }
+
+    @Test fun malformedChromeVersionCannotProduceMalformedClientHints() {
+        listOf("Chrome/.", "Chrome/140..1", "Chrome/140.0.invalid", "Chrome/140.0.").forEach { malformed ->
+            assertTrue(MobileUserAgent.windowsChrome(malformed).contains("Chrome/131.0.0.0"))
+            assertEquals("131.0.0.0", MobileUserAgent.windowsMetadata(malformed).fullVersion)
+        }
+    }
 }

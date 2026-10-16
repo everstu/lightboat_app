@@ -19,6 +19,18 @@ import com.lightboat.app.DebugLog
 import org.json.JSONObject
 import java.net.URI
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+
+private object ScriptStorage {
+    // One queue preserves write/read order even when a profile recreates its host.
+    val worker = ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS, ArrayBlockingQueue(64),
+        { task -> Thread(task, "userscript-storage").apply { isDaemon = true } },
+        { _, _ -> throw RejectedExecutionException("GM 存储繁忙，请稍后重试") }
+    ).apply { allowCoreThreadTimeOut(true) }
+}
 
 private object UserScriptAssets {
     private var matcher: String? = null
@@ -102,12 +114,26 @@ class UserScriptHost(
                 if (error != null) response.put("error", error) else response.put("result", result ?: JSONObject.NULL)
                 runCatching { reply.postMessage(response.toString()) }
             }
+            fun storageTask(session: Session, task: () -> Any?, success: (Any?) -> Unit = { respond(it) }) {
+                ScriptStorage.worker.execute {
+                    val result = runCatching(task)
+                    handler.post {
+                        if (!alive || sessions[doc] !== session) return@post
+                        result.fold(onSuccess = success, onFailure = { error ->
+                            log("error", error.message.orEmpty())
+                            respond(error = error.message ?: "GM 存储失败")
+                        })
+                    }
+                }
+            }
             try {
                 if (op == "hello") {
                     require(sessions.size < 100) { "脚本 frame 数量超过上限" }
-                    sessions[doc] = Session(address, reply)
+                    val session = Session(address, reply)
+                    sessions[doc] = session
                     val readsValues = meta.grants.any { it.contains("Value") }
-                    respond(if (readsValues && "none" !in meta.grants) store.snapshot() else JSONObject())
+                    if (readsValues && "none" !in meta.grants) storageTask(session, { store.snapshot() })
+                    else respond(JSONObject())
                     return@addWebMessageListener
                 }
                 val session = sessions[doc] ?: error("脚本文档已失效")
@@ -131,12 +157,13 @@ class UserScriptHost(
                         val key = payload.getString("key")
                         val value = if (op == "deleteValue") null else payload.getJSONObject("value")
                         if (value != null) require(value.optString("type") in setOf("json", "undefined")) { "存储值格式无效" }
-                        store.update(key, value)
-                        sessions.filterKeys { it != doc }.forEach { (other, recipient) ->
-                            runCatching { recipient.reply.postMessage(JSONObject().put("doc", other).put("event", "value")
-                                .put("key", key).put("value", value ?: JSONObject.NULL).put("deleted", value == null).toString()) }
+                        storageTask(session, { store.update(key, value) }) {
+                            sessions.filterKeys { it != doc }.forEach { (other, recipient) ->
+                                runCatching { recipient.reply.postMessage(JSONObject().put("doc", other).put("event", "value")
+                                    .put("key", key).put("value", value ?: JSONObject.NULL).put("deleted", value == null).toString()) }
+                            }
+                            respond()
                         }
-                        respond()
                     }
                     "menuRegister" -> {
                         require(commands.size < 100) { "脚本菜单数量超过上限" }

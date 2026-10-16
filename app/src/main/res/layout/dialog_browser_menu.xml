@@ -1,21 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
-    android:padding="24dp" android:background="@color/paper">
-    <TextView android:id="@+id/menuProfileName" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:textColor="@color/ink" android:textStyle="bold" android:textSize="22sp" android:layout_marginBottom="16dp" />
-    <Button android:id="@+id/menuSwitch" android:layout_width="match_parent" android:layout_height="52dp"
-        style="?attr/borderlessButtonStyle" android:text="@string/switch_configuration" android:textColor="@color/accent" />
-    <Button android:id="@+id/menuScan" android:layout_width="match_parent" android:layout_height="52dp"
-        style="?attr/borderlessButtonStyle" android:text="@string/scan_copy" android:textColor="@color/accent" />
-    <Button android:id="@+id/menuRefresh" android:layout_width="match_parent" android:layout_height="52dp"
-        style="?attr/borderlessButtonStyle" android:text="@string/refresh" android:textColor="@color/accent" />
-    <Button android:id="@+id/menuSettings" android:layout_width="match_parent" android:layout_height="52dp"
-        style="?attr/borderlessButtonStyle" android:text="@string/manage_configurations" android:textColor="@color/accent" />
-    <Button android:id="@+id/menuScriptCommands" android:layout_width="match_parent" android:layout_height="48dp"
-        style="?attr/borderlessButtonStyle" android:text="@string/script_commands" android:textColor="@color/accent" />
-    <Button android:id="@+id/menuScriptLogs" android:layout_width="match_parent" android:layout_height="48dp"
-        style="?attr/borderlessButtonStyle" android:text="@string/debug_logs" android:textColor="@color/accent" />
-    <Button android:id="@+id/menuClose" android:layout_width="match_parent" android:layout_height="52dp"
-        style="?attr/borderlessButtonStyle" android:text="@string/cancel" android:textColor="@color/muted" />
+    android:paddingTop="24dp" android:paddingBottom="16dp" android:background="@drawable/bg_config_dialog">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:paddingStart="24dp" android:paddingEnd="12dp" android:gravity="center_vertical">
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/menu_current_profile" android:textColor="@color/muted" android:textSize="12sp" />
+            <TextView android:id="@+id/menuProfileName" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/ink" android:textStyle="bold" android:textSize="22sp" android:layout_marginTop="6dp"
+                android:maxLines="2" android:ellipsize="end" />
+            <TextView android:id="@+id/menuProfileHost" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="5dp" android:textSize="13sp" android:textColor="@color/muted" android:maxLines="1" android:ellipsize="middle" />
+        </LinearLayout>
+        <ImageButton android:id="@+id/menuClose" android:layout_width="48dp" android:layout_height="48dp"
+            android:src="@drawable/ic_close" app:tint="@color/muted" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="@string/close_browser_menu" />
+    </LinearLayout>
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:layout_marginTop="20dp" android:clipToPadding="false" android:fillViewport="false">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingHorizontal="20dp" android:paddingBottom="4dp">
+            <Button android:id="@+id/menuSwitch" style="@style/ConfigPrimary" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:minHeight="54dp" android:text="@string/switch_configuration"
+                android:drawableStart="@drawable/ic_switch" android:drawableTint="@color/white" android:drawablePadding="12dp" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:baselineAligned="false">
+                <Button android:id="@+id/menuScan" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:minHeight="52dp" android:text="@string/scan_copy" />
+                <Button android:id="@+id/menuRefresh" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:minHeight="52dp" android:layout_marginStart="12dp" android:text="@string/refresh" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:baselineAligned="false">
+                <Button android:id="@+id/menuSettings" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:minHeight="52dp" android:text="@string/manage_configurations" />
+                <Button android:id="@+id/menuScriptLogs" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content" android:minHeight="52dp" android:layout_marginStart="12dp" android:text="@string/debug_logs" />
+            </LinearLayout>
+            <Button android:id="@+id/menuScriptCommands" style="@style/ConfigAction" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:minHeight="48dp" android:layout_marginTop="8dp" android:text="@string/script_commands" />
+        </LinearLayout>
+    </ScrollView>
 </LinearLayout>
