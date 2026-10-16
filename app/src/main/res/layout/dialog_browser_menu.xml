@@ -23,19 +23,19 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:baselineAligned="false">
                 <Button android:id="@+id/menuSwitch" style="@style/BrowserMenuAction.Primary" android:layout_width="0dp" android:layout_weight="1"
                     android:text="@string/switch_configuration" />
-                <Button android:id="@+id/menuSettings" style="@style/BrowserMenuAction.Tinted" android:layout_width="0dp" android:layout_weight="1"
+                <Button android:id="@+id/menuSettings" style="@style/BrowserMenuAction.Primary" android:layout_width="0dp" android:layout_weight="1"
                     android:layout_marginStart="8dp"
                     android:textStyle="bold" android:text="@string/manage_configurations" />
             </LinearLayout>
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:baselineAligned="false">
-                <Button android:id="@+id/menuScan" style="@style/BrowserMenuAction.Tinted" android:layout_width="0dp" android:layout_weight="1"
+                <Button android:id="@+id/menuScan" style="@style/BrowserMenuAction" android:layout_width="0dp" android:layout_weight="1"
                     android:text="@string/scan_copy" />
                 <Button android:id="@+id/menuRefresh" style="@style/BrowserMenuAction" android:layout_width="0dp" android:layout_weight="1"
                     android:layout_marginStart="8dp" android:text="@string/refresh" />
             </LinearLayout>
             <Button android:id="@+id/menuScriptLogs" style="@style/BrowserMenuAction" android:layout_width="match_parent"
                 android:layout_marginTop="4dp" android:text="@string/debug_logs" />
-            <Button android:id="@+id/menuScriptCommands" style="@style/BrowserMenuAction.Commands" android:layout_width="match_parent"
+            <Button android:id="@+id/menuScriptCommands" style="@style/BrowserMenuAction" android:layout_width="match_parent"
                 android:layout_marginTop="4dp" android:text="@string/script_commands" />
         </LinearLayout>
     </ScrollView>

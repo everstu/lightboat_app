@@ -93,13 +93,6 @@
         <item name="android:textColor">@color/white</item>
         <item name="android:textStyle">bold</item>
     </style>
-    <style name="BrowserMenuAction.Tinted" parent="BrowserMenuAction">
-        <item name="android:background">@drawable/bg_menu_settings</item>
-        <item name="android:textColor">@color/category_badge_ink</item>
-    </style>
-    <style name="BrowserMenuAction.Commands" parent="BrowserMenuAction">
-        <item name="android:background">?attr/selectableItemBackground</item>
-    </style>
     <style name="ConfigSegment" parent="ConfigAction">
         <item name="android:background">@drawable/bg_config_segment</item>
         <item name="android:textColor">@color/config_segment_text</item>
