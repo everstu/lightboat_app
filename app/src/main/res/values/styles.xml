@@ -61,6 +61,26 @@
         <item name="android:paddingStart">4dp</item>
         <item name="android:paddingEnd">4dp</item>
     </style>
+    <style name="CategoryFilter" parent="ConfigSecondary">
+        <item name="android:layout_height">48dp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:gravity">start|center_vertical</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:drawableEnd">@drawable/ic_expand</item>
+        <item name="android:drawablePadding">8dp</item>
+    </style>
+    <style name="FavoriteFilter" parent="ConfigSegment">
+        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:drawablePadding">6dp</item>
+        <item name="android:text">@string/favorites_only</item>
+    </style>
     <style name="UrlField">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>

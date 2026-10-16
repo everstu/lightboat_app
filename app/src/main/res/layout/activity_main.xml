@@ -53,25 +53,23 @@
                             android:hint="@string/profile_name_hint" android:maxLength="60" android:imeOptions="actionNext" />
                         <TextView style="@style/FieldLabel" android:layout_marginTop="20dp"
                             android:text="@string/category_label" android:labelFor="@id/categoryInput" />
-                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp" android:gravity="center_vertical">
-                            <androidx.appcompat.widget.AppCompatAutoCompleteTextView android:id="@+id/categoryInput" style="@style/UrlField"
+                        <LinearLayout android:id="@+id/categoryField" android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp" android:gravity="center_vertical" android:background="@drawable/bg_input">
+                            <androidx.appcompat.widget.AppCompatEditText android:id="@+id/categoryInput" style="@style/UrlField"
                                 android:layout_width="0dp" android:layout_weight="1" android:layout_marginTop="0dp"
-                                android:inputType="textCapSentences" android:maxLength="60" android:completionThreshold="1"
+                                android:background="@null" android:paddingStart="16dp" android:paddingEnd="4dp"
+                                android:inputType="textCapSentences" android:maxLength="60"
                                 android:hint="@string/category_hint" android:imeOptions="actionNext" />
-                            <ImageButton android:id="@+id/chooseCategory" android:layout_width="48dp" android:layout_height="48dp"
-                                android:src="@drawable/ic_chevron" android:rotation="90" android:contentDescription="@string/category_choose"
-                                android:background="?attr/selectableItemBackgroundBorderless" />
                             <ImageButton android:id="@+id/clearCategory" android:layout_width="48dp" android:layout_height="48dp"
                                 android:src="@drawable/ic_close" android:contentDescription="@string/category_clear"
-                                android:background="?attr/selectableItemBackgroundBorderless" />
+                                android:background="?attr/selectableItemBackgroundBorderless" android:visibility="gone" />
+                            <ImageButton android:id="@+id/chooseCategory" android:layout_width="48dp" android:layout_height="48dp"
+                                android:src="@drawable/ic_expand" android:contentDescription="@string/category_choose"
+                                android:layout_marginEnd="4dp" android:background="?attr/selectableItemBackgroundBorderless" />
                         </LinearLayout>
                         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:layout_marginTop="8dp" android:text="@string/category_help"
                             android:textColor="@color/muted" android:textSize="12sp" />
-                        <CheckBox android:id="@+id/favoriteInput" android:layout_width="match_parent" android:layout_height="wrap_content"
-                            android:minHeight="48dp" android:layout_marginTop="8dp" android:text="@string/profile_favorite"
-                            android:textSize="14sp" android:textColor="@color/ink" />
                         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:layout_marginTop="16dp" android:gravity="center_vertical">
                             <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
@@ -160,12 +158,9 @@
                 </LinearLayout>
                 <LinearLayout android:id="@+id/profileFilters" android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="20dp" android:paddingHorizontal="24dp" android:gravity="center_vertical">
-                    <Button android:id="@+id/categoryFilter" style="@style/ConfigSecondary" android:layout_width="0dp"
-                        android:layout_weight="1" android:layout_height="48dp" android:singleLine="true" android:ellipsize="end"
-                        android:gravity="start|center_vertical" android:drawableEnd="@drawable/ic_expand" android:drawablePadding="8dp" />
-                    <Button android:id="@+id/favoriteFilter" style="@style/ConfigSegment" android:layout_width="wrap_content"
-                        android:layout_height="48dp" android:layout_marginStart="12dp" android:paddingHorizontal="16dp"
-                        android:text="@string/favorites_only" android:drawablePadding="8dp" />
+                    <Button android:id="@+id/categoryFilter" style="@style/CategoryFilter" android:layout_width="0dp"
+                        android:layout_weight="1" />
+                    <Button android:id="@+id/favoriteFilter" style="@style/FavoriteFilter" android:layout_marginStart="8dp" />
                 </LinearLayout>
                 <LinearLayout android:id="@+id/profilesSection" android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="16dp" android:paddingHorizontal="24dp" android:paddingBottom="12dp" android:gravity="center_vertical">

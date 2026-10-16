@@ -33,12 +33,8 @@
     </LinearLayout>
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
         android:paddingHorizontal="20dp" android:gravity="center_vertical">
-        <Button android:id="@+id/categoryFilter" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
-            android:layout_height="48dp" android:singleLine="true" android:ellipsize="end" android:gravity="start|center_vertical"
-            android:drawableEnd="@drawable/ic_expand" android:drawablePadding="8dp" />
-        <Button android:id="@+id/favoriteFilter" style="@style/ConfigSegment" android:layout_width="wrap_content"
-            android:layout_height="48dp" android:layout_marginStart="12dp" android:paddingHorizontal="16dp"
-            android:text="@string/favorites_only" android:drawablePadding="8dp" />
+        <Button android:id="@+id/categoryFilter" style="@style/CategoryFilter" android:layout_width="0dp" android:layout_weight="1" />
+        <Button android:id="@+id/favoriteFilter" style="@style/FavoriteFilter" android:layout_marginStart="8dp" />
     </LinearLayout>
     <!-- Measure complete cards before assigning the remaining space to the scrollable list. -->
     <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_weight="1"

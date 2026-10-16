@@ -1,0 +1,4 @@
+<resources>
+    <!-- A visual text budget, measured with the actual filter label font. -->
+    <dimen name="category_name_max_width">96sp</dimen>
+</resources>

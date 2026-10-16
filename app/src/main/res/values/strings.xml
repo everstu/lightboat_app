@@ -161,8 +161,10 @@
     <string name="import_network_failed">连接失败，请检查网络或链接后重试。</string>
     <string name="import_timeout">读取超时，请稍后重试。</string>
     <string name="category_label">分类（可选）</string>
-    <string name="category_hint">选择或填写分类</string>
-    <string name="category_help">可选择已有分类，或输入新名称；留空表示未分类。</string>
+    <string name="category_hint">输入或选择分类</string>
+    <string name="category_help">留空为未分类；可直接输入新分类，长度以单行显示宽度为准。</string>
+    <string name="category_name_too_wide">分类名称过长，请缩短至一行</string>
+    <string name="category_selected">当前分类</string>
     <string name="category_choose">选择分类</string>
     <string name="category_clear">不设置分类</string>
     <string name="category_all">全部分类</string>

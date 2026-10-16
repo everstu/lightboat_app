@@ -33,7 +33,7 @@ import android.webkit.WebViewClient
 import android.webkit.RenderProcessGoneDetail
 import android.widget.Toast
 import android.widget.FrameLayout
-import android.widget.ArrayAdapter
+import android.text.InputFilter
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -42,6 +42,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.widget.doAfterTextChanged
 import androidx.webkit.ScriptHandler
 import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebSettingsCompat
@@ -93,6 +94,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fullscreenPlayer: FullscreenPlayer
     private var userScriptHost: UserScriptHost? = null
     private lateinit var profileAdapter: ProfileAdapter
+    private lateinit var categoryNameInputFilter: CategoryNameInputFilter
     private lateinit var profileDrag: ItemTouchHelper
     private var profileOrderDirty = false
     private var profileFilter = ProfileFilter()
@@ -192,15 +194,29 @@ class MainActivity : AppCompatActivity() {
         binding.emptyAddButton.setOnClickListener { showEditor(null) }
         binding.emptyImportButton.setOnClickListener { showConfigImport() }
         binding.resetProfileFilters.setOnClickListener { changeProfileFilter(ProfileFilter()) }
-        binding.clearCategory.setOnClickListener { binding.categoryInput.setText("", false) }
+        categoryNameInputFilter = CategoryNameInputFilter(binding.categoryFilter.paint, {
+            val label = binding.categoryFilter
+            val available = label.width - label.compoundPaddingLeft - label.compoundPaddingRight
+            val preferred = resources.getDimension(R.dimen.category_name_max_width)
+            if (available > 0) minOf(preferred, available.toFloat()) else preferred
+        }, { config.categories.values })
+        binding.categoryInput.filters = arrayOf(InputFilter.LengthFilter(AppConfig.MAX_CATEGORY_NAME), categoryNameInputFilter)
+        binding.categoryInput.doAfterTextChanged {
+            binding.clearCategory.visibility = if (it.isNullOrEmpty()) View.GONE else View.VISIBLE
+            binding.categoryInput.error = null
+        }
+        binding.clearCategory.setOnClickListener { binding.categoryInput.text?.clear() }
         binding.chooseCategory.setOnClickListener {
-            val names = config.categories.values.toTypedArray()
-            val choices = arrayOf(getString(R.string.category_clear), *names)
-            showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.category_choose)
-                .setItems(choices) { _, index ->
-                    binding.categoryInput.setText(if (index == 0) "" else names[index - 1], false)
-                    binding.categoryInput.error = null
-                }.setNegativeButton(R.string.import_cancel, null).create())
+            val text = binding.categoryInput.text.toString().trim()
+            val selectedId = if (text.isEmpty()) null else config.categories.entries
+                .firstOrNull { it.value.equals(text, ignoreCase = true) }?.key ?: ""
+            val choices = listOf(CategoryChoice(null, getString(R.string.category_clear))) +
+                config.categories.map { (id, name) -> CategoryChoice(id, name) }
+            hideKeyboard()
+            showCategoryChoices(binding.categoryField, choices, selectedId) { choice ->
+                binding.categoryInput.setText(choice.id?.let { config.categories[it] }.orEmpty())
+                binding.categoryInput.setSelection(binding.categoryInput.length())
+            }
         }
         binding.saveButton.setOnClickListener { saveEditor(false) }
         binding.saveOpenButton.setOnClickListener { saveEditor(true) }
@@ -238,8 +254,7 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState?.getBoolean("editor") == true) {
             showEditor(config.profiles.firstOrNull { it.id == savedInstanceState.getString("editingId") })
             binding.nameInput.setText(savedInstanceState.getString("draftName"))
-            binding.categoryInput.setText(savedInstanceState.getString("draftCategory").orEmpty(), false)
-            binding.favoriteInput.isChecked = savedInstanceState.getBoolean("draftFavorite")
+            binding.categoryInput.setText(savedInstanceState.getString("draftCategory").orEmpty())
             binding.websiteInput.setText(savedInstanceState.getString("draftUrl"))
             binding.scriptInput.setText(savedInstanceState.getString("draftScript"))
             binding.userAgentInput.setText(savedInstanceState.getString("draftUserAgent", defaultUserAgent))
@@ -578,10 +593,8 @@ class MainActivity : AppCompatActivity() {
         binding.configDescription.setText(if (profile == null) R.string.setup_description else R.string.edit_profile_description)
         binding.nameInput.setText(profile?.name.orEmpty())
         val categoryId = profile?.categoryId ?: if (profile == null) profileFilter.categoryId else null
-        binding.categoryInput.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, config.categories.values.toList()))
-        binding.categoryInput.setText(config.categories[categoryId].orEmpty(), false)
+        binding.categoryInput.setText(config.categories[categoryId].orEmpty())
         binding.categoryInput.error = null
-        binding.favoriteInput.isChecked = profile?.favorite ?: profileFilter.favoritesOnly
         binding.websiteInput.setText(profile?.url.orEmpty())
         binding.scriptInput.setText(profile?.scriptUrl.orEmpty())
         binding.userAgentInput.setText(profile?.userAgent ?: defaultUserAgent)
@@ -632,9 +645,13 @@ class MainActivity : AppCompatActivity() {
         val categoryName = try { AppConfig.normalizeCategoryName(binding.categoryInput.text.toString()) } catch (error: IllegalArgumentException) {
             binding.categoryInput.error = error.message; binding.categoryInput.requestFocus(); return
         }
+        if (!categoryNameInputFilter.fits(categoryName)) {
+            binding.categoryInput.error = getString(R.string.category_name_too_wide)
+            binding.categoryInput.requestFocus(); return
+        }
         val previous = config.profiles.firstOrNull { it.id == editingId }
         val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent, editingPlatform,
-            previous?.categoryId, binding.favoriteInput.isChecked)
+            previous?.categoryId, previous?.favorite ?: false)
         val next = try {
             config.upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
         } catch (error: Exception) {
@@ -1119,7 +1136,6 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("profileFavoriteFilter", profileFilter.favoritesOnly)
         outState.putString("draftName", binding.nameInput.text.toString())
         outState.putString("draftCategory", binding.categoryInput.text.toString())
-        outState.putBoolean("draftFavorite", binding.favoriteInput.isChecked)
         outState.putString("draftUrl", binding.websiteInput.text.toString())
         outState.putString("draftScript", binding.scriptInput.text.toString())
         outState.putString("draftUserAgent", binding.userAgentInput.text.toString())
