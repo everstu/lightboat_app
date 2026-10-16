@@ -1,6 +1,9 @@
 {
   "version": 1,
   "lastProfileId": "main",
+  "categories": {
+    "2b7f72eb-1b7e-4e4c-bb4a-bf80631f9a71": "日常"
+  },
   "profiles": [
     {
       "id": "main",
@@ -8,7 +11,9 @@
       "url": "https://example.com",
       "scriptUrl": "https://example.com/app.js",
       "userAgent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
-      "platform": "android"
+      "platform": "android",
+      "categoryId": "2b7f72eb-1b7e-4e4c-bb4a-bf80631f9a71",
+      "favorite": true
     },
     {
       "id": "test",
@@ -16,7 +21,9 @@
       "url": "https://test.example.com",
       "scriptUrl": "https://test.example.com/app.js",
       "userAgent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
-      "platform": "android"
+      "platform": "android",
+      "categoryId": null,
+      "favorite": false
     }
   ]
 }

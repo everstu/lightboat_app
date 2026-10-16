@@ -33,6 +33,7 @@ import android.webkit.WebViewClient
 import android.webkit.RenderProcessGoneDetail
 import android.widget.Toast
 import android.widget.FrameLayout
+import android.widget.ArrayAdapter
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -94,6 +95,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var profileAdapter: ProfileAdapter
     private lateinit var profileDrag: ItemTouchHelper
     private var profileOrderDirty = false
+    private var profileFilter = ProfileFilter()
+    private var profileOrderFilter = ProfileFilter()
     private var settingsInfoInitialized = false
     private val nativeGuardScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("native-guard.js") }
     private val clipboardSupportScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("clipboard-support.js") }
@@ -188,6 +191,17 @@ class MainActivity : AppCompatActivity() {
         binding.addButton.setOnClickListener { showEditor(null) }
         binding.emptyAddButton.setOnClickListener { showEditor(null) }
         binding.emptyImportButton.setOnClickListener { showConfigImport() }
+        binding.resetProfileFilters.setOnClickListener { changeProfileFilter(ProfileFilter()) }
+        binding.clearCategory.setOnClickListener { binding.categoryInput.setText("", false) }
+        binding.chooseCategory.setOnClickListener {
+            val names = config.categories.values.toTypedArray()
+            val choices = arrayOf(getString(R.string.category_clear), *names)
+            showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.category_choose)
+                .setItems(choices) { _, index ->
+                    binding.categoryInput.setText(if (index == 0) "" else names[index - 1], false)
+                    binding.categoryInput.error = null
+                }.setNegativeButton(R.string.import_cancel, null).create())
+        }
         binding.saveButton.setOnClickListener { saveEditor(false) }
         binding.saveOpenButton.setOnClickListener { saveEditor(true) }
         binding.cancelButton.setOnClickListener { showProfiles() }
@@ -213,6 +227,8 @@ class MainActivity : AppCompatActivity() {
             toast(getString(R.string.config_read_error))
             AppConfig.EMPTY
         }
+        profileFilter = ProfileFilter(savedInstanceState?.getString("profileCategoryFilter"),
+            savedInstanceState?.getBoolean("profileFavoriteFilter") ?: false).resolve(config)
         exportSnapshot = savedInstanceState?.getString("exportSnapshot")
         scanTarget = savedInstanceState?.getString("scanTarget")?.let { value ->
             ScanTarget.entries.firstOrNull { it.name == value }
@@ -222,6 +238,8 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState?.getBoolean("editor") == true) {
             showEditor(config.profiles.firstOrNull { it.id == savedInstanceState.getString("editingId") })
             binding.nameInput.setText(savedInstanceState.getString("draftName"))
+            binding.categoryInput.setText(savedInstanceState.getString("draftCategory").orEmpty(), false)
+            binding.favoriteInput.isChecked = savedInstanceState.getBoolean("draftFavorite")
             binding.websiteInput.setText(savedInstanceState.getString("draftUrl"))
             binding.scriptInput.setText(savedInstanceState.getString("draftScript"))
             binding.userAgentInput.setText(savedInstanceState.getString("draftUserAgent", defaultUserAgent))
@@ -367,7 +385,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showProfilePicker() {
         if (config.profiles.isEmpty()) { showProfiles(); return }
-        showNativeDialog(ProfileSwitchDialog(this, config.profiles, currentId, ::openProfile))
+        showNativeDialog(ProfileSwitchDialog(this, config, currentId, ::openProfile))
     }
 
     private fun startScan(target: ScanTarget) {
@@ -438,10 +456,28 @@ class MainActivity : AppCompatActivity() {
         ensureSettingsUi()
         hideKeyboard()
         showScreen(Screen.PROFILES)
+        renderProfiles()
+    }
+
+    private fun changeProfileFilter(next: ProfileFilter) {
+        commitProfileOrder()
+        profileFilter = next.resolve(config)
+        renderProfiles()
+        binding.profilesList.scrollToPosition(0)
+    }
+
+    private fun renderProfiles() {
+        profileFilter = profileFilter.resolve(config)
+        val visible = profileFilter.apply(config)
+        bindProfileCategoryFilter(binding.categoryFilter, config, profileFilter, ::changeProfileFilter)
+        bindProfileFavoriteFilter(binding.favoriteFilter, profileFilter, ::changeProfileFilter)
+        binding.profileFilters.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
         binding.emptyProfiles.visibility = if (config.profiles.isEmpty()) View.VISIBLE else View.GONE
         binding.profilesSection.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
-        binding.profilesList.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
-        binding.profileCount.text = getString(R.string.profiles_count, config.profiles.size)
+        binding.profilesList.visibility = if (visible.isEmpty()) View.GONE else View.VISIBLE
+        binding.emptyFilteredProfiles.visibility = if (config.profiles.isNotEmpty() && visible.isEmpty()) View.VISIBLE else View.GONE
+        binding.profileCount.text = if (profileFilter == ProfileFilter()) getString(R.string.profiles_count, config.profiles.size)
+            else getString(R.string.profiles_filtered_count, visible.size, config.profiles.size)
         binding.returnButton.visibility = if (pageReady && webView != null) View.VISIBLE else View.GONE
         binding.exportButton.isEnabled = config.profiles.isNotEmpty()
         binding.exportButton.alpha = if (binding.exportButton.isEnabled) 1f else 0.4f
@@ -451,11 +487,12 @@ class MainActivity : AppCompatActivity() {
         binding.addButton.setText(if (binding.addButton.isEnabled) getString(R.string.add_profile)
             else getString(R.string.profile_limit, AppConfig.MAX_PROFILES))
         profileOrderDirty = false
-        profileAdapter.submit(config, currentId.takeIf { webView != null })
+        profileOrderFilter = profileFilter
+        profileAdapter.submit(config, currentId.takeIf { webView != null }, visible)
     }
 
     private fun setupProfileList() {
-        profileAdapter = ProfileAdapter(::openProfile, ::showEditor, ::confirmDeleteProfile) { holder ->
+        profileAdapter = ProfileAdapter(::openProfile, ::showEditor, ::confirmDeleteProfile, ::toggleProfileFavorite, ::moveProfileToTop) { holder ->
             profileDrag.startDrag(holder)
         }
         binding.profilesList.layoutManager = LinearLayoutManager(this)
@@ -495,10 +532,27 @@ class MainActivity : AppCompatActivity() {
         if (!::profileAdapter.isInitialized || !profileOrderDirty) return
         profileOrderDirty = false
         val ids = profileAdapter.orderedIds
-        if (ids == config.profiles.map { it.id }) return
+        val visibleIds = profileOrderFilter.apply(config).map { it.id }
+        if (ids == visibleIds) return
         // A configuration import/delete can invalidate an old drag animation's callback.
-        if (ids.toSet() != config.profiles.map { it.id }.toSet()) return
-        if (!persist(config.reorder(ids))) profileAdapter.submit(config, currentId.takeIf { webView != null })
+        if (ids.size != visibleIds.size || ids.toSet() != visibleIds.toSet()) return
+        if (!persist(config.reorderVisible(ids, profileOrderFilter))) renderProfiles()
+    }
+
+    private fun toggleProfileFavorite(profile: Profile) {
+        commitProfileOrder()
+        if (config.profiles.none { it.id == profile.id }) return
+        if (persist(config.toggleFavorite(profile.id))) renderProfiles()
+    }
+
+    private fun moveProfileToTop(profile: Profile) {
+        commitProfileOrder()
+        if (config.profiles.none { it.id == profile.id }) return
+        if (persist(config.moveToTop(profile.id))) {
+            renderProfiles()
+            binding.profilesList.scrollToPosition(0)
+            toast(getString(R.string.profile_moved_top))
+        }
     }
 
     private fun confirmDeleteProfile(profile: Profile) {
@@ -523,6 +577,11 @@ class MainActivity : AppCompatActivity() {
         binding.configTitle.setText(if (profile == null) R.string.setup_title else R.string.edit_profile)
         binding.configDescription.setText(if (profile == null) R.string.setup_description else R.string.edit_profile_description)
         binding.nameInput.setText(profile?.name.orEmpty())
+        val categoryId = profile?.categoryId ?: if (profile == null) profileFilter.categoryId else null
+        binding.categoryInput.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, config.categories.values.toList()))
+        binding.categoryInput.setText(config.categories[categoryId].orEmpty(), false)
+        binding.categoryInput.error = null
+        binding.favoriteInput.isChecked = profile?.favorite ?: profileFilter.favoritesOnly
         binding.websiteInput.setText(profile?.url.orEmpty())
         binding.scriptInput.setText(profile?.scriptUrl.orEmpty())
         binding.userAgentInput.setText(profile?.userAgent ?: defaultUserAgent)
@@ -570,15 +629,20 @@ class MainActivity : AppCompatActivity() {
         val userAgent = try { AppConfig.normalizeUserAgent(binding.userAgentInput.text.toString()) } catch (error: IllegalArgumentException) {
             binding.userAgentInput.error = error.message; binding.userAgentInput.requestFocus(); return
         }
-        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent, editingPlatform)
+        val categoryName = try { AppConfig.normalizeCategoryName(binding.categoryInput.text.toString()) } catch (error: IllegalArgumentException) {
+            binding.categoryInput.error = error.message; binding.categoryInput.requestFocus(); return
+        }
+        val previous = config.profiles.firstOrNull { it.id == editingId }
+        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent, editingPlatform,
+            previous?.categoryId, binding.favoriteInput.isChecked)
         val next = try {
-            config.upsert(profile).let { if (openAfterSave) it.select(profile.id) else it }
+            config.upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
         } catch (error: Exception) {
             toast(error.message.orEmpty()); return
         }
         if (persist(next)) {
             hideKeyboard()
-            if (openAfterSave) openProfile(profile) else {
+            if (openAfterSave) openProfile(next.profiles.first { it.id == profile.id }) else {
                 showProfiles()
                 toast(getString(R.string.profile_saved))
             }
@@ -976,6 +1040,7 @@ class MainActivity : AppCompatActivity() {
         }) { imported ->
             if (!persist(imported)) false else {
                 profileOrderDirty = false
+                profileFilter = ProfileFilter()
                 cancelDownload(); destroyWebView(); currentId = null
                 toast(getString(R.string.import_success, imported.profiles.size))
                 launchLast()
@@ -1050,7 +1115,11 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("manager", screen == Screen.PROFILES)
         outState.putBoolean("editor", screen == Screen.EDITOR)
         outState.putString("editingId", editingId)
+        outState.putString("profileCategoryFilter", profileFilter.categoryId)
+        outState.putBoolean("profileFavoriteFilter", profileFilter.favoritesOnly)
         outState.putString("draftName", binding.nameInput.text.toString())
+        outState.putString("draftCategory", binding.categoryInput.text.toString())
+        outState.putBoolean("draftFavorite", binding.favoriteInput.isChecked)
         outState.putString("draftUrl", binding.websiteInput.text.toString())
         outState.putString("draftScript", binding.scriptInput.text.toString())
         outState.putString("draftUserAgent", binding.userAgentInput.text.toString())

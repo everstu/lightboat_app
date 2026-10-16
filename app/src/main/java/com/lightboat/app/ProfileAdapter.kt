@@ -12,18 +12,22 @@ class ProfileAdapter(
     private val open: (Profile) -> Unit,
     private val edit: (Profile) -> Unit,
     private val delete: (Profile) -> Unit,
+    private val favorite: (Profile) -> Unit,
+    private val moveToTop: (Profile) -> Unit,
     private val startDrag: (RecyclerView.ViewHolder) -> Unit
 ) : RecyclerView.Adapter<ProfileAdapter.Holder>() {
     class Holder(val binding: ItemProfileBinding) : RecyclerView.ViewHolder(binding.root)
     private val profiles = mutableListOf<Profile>()
     private var lastId: String? = null
     private var currentId: String? = null
+    private var categories: Map<String, String> = emptyMap()
     val orderedIds get() = profiles.map { it.id }
 
     @SuppressLint("NotifyDataSetChanged")
-    fun submit(config: AppConfig, current: String?) {
+    fun submit(config: AppConfig, current: String?, visible: List<Profile> = config.profiles) {
         profiles.clear()
-        profiles.addAll(config.profiles)
+        profiles.addAll(visible)
+        categories = config.categories
         lastId = config.lastProfileId
         currentId = current
         notifyDataSetChanged()
@@ -45,6 +49,14 @@ class ProfileAdapter(
         val row = holder.binding
         val context = row.root.context
         row.profileName.text = profile.name
+        row.profileCategory.text = context.getString(R.string.profile_category,
+            categories[profile.categoryId] ?: context.getString(R.string.category_none))
+        row.favoriteProfile.setImageResource(if (profile.favorite) R.drawable.ic_star else R.drawable.ic_star_outline)
+        row.favoriteProfile.contentDescription = context.getString(
+            if (profile.favorite) R.string.profile_unfavorite_description else R.string.profile_favorite_description, profile.name)
+        row.favoriteProfile.setOnClickListener { favorite(profile) }
+        row.topProfile.contentDescription = context.getString(R.string.profile_top_description, profile.name)
+        row.topProfile.setOnClickListener { moveToTop(profile) }
         row.root.isActivated = profile.id == currentId
         row.profileUrl.text = profile.url.substringBefore('?').substringBefore('#')
         row.profileScript.text = if (profile.scriptUrl.isBlank()) context.getString(R.string.profile_script_none)

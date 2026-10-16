@@ -31,6 +31,15 @@
             android:src="@drawable/ic_close" app:tint="@color/muted" android:background="?attr/selectableItemBackgroundBorderless"
             android:visibility="gone" android:contentDescription="@string/clear_profile_search" />
     </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+        android:paddingHorizontal="20dp" android:gravity="center_vertical">
+        <Button android:id="@+id/categoryFilter" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="48dp" android:singleLine="true" android:ellipsize="end" android:gravity="start|center_vertical"
+            android:drawableEnd="@drawable/ic_expand" android:drawablePadding="8dp" />
+        <Button android:id="@+id/favoriteFilter" style="@style/ConfigSegment" android:layout_width="wrap_content"
+            android:layout_height="48dp" android:layout_marginStart="12dp" android:paddingHorizontal="16dp"
+            android:text="@string/favorites_only" android:drawablePadding="8dp" />
+    </LinearLayout>
     <!-- Measure complete cards before assigning the remaining space to the scrollable list. -->
     <FrameLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_weight="1"
         android:layout_marginTop="16dp" android:minHeight="96dp" tools:ignore="InefficientWeight">
@@ -40,10 +49,12 @@
         <LinearLayout android:id="@+id/noProfilesFound" android:layout_width="match_parent" android:layout_height="match_parent"
             android:orientation="vertical" android:gravity="center" android:padding="24dp" android:visibility="gone">
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="@string/profiles_search_empty" android:textColor="@color/ink" android:textSize="16sp"
+                android:text="@string/profiles_filter_empty" android:textColor="@color/ink" android:textSize="16sp"
                 android:gravity="center" android:textStyle="bold" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"
-                android:text="@string/profiles_search_empty_hint" android:textColor="@color/muted" android:textSize="13sp" android:gravity="center" />
+                android:text="@string/profiles_filter_search_hint" android:textColor="@color/muted" android:textSize="13sp" android:gravity="center" />
+            <Button android:id="@+id/resetFilters" style="@style/ConfigAction" android:layout_width="wrap_content"
+                android:layout_height="48dp" android:layout_marginTop="12dp" android:text="@string/profiles_reset_filters" />
         </LinearLayout>
     </FrameLayout>
     <LinearLayout android:id="@+id/switchFooter" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"

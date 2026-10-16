@@ -23,12 +23,14 @@ import com.lightboat.app.databinding.ItemSwitchProfileBinding
 
 internal class ProfileSwitchDialog(
     private val activity: AppCompatActivity,
-    private val profiles: List<Profile>,
+    private val config: AppConfig,
     private val currentId: String?,
     private val open: (Profile) -> Unit,
 ) : AppCompatDialog(activity, R.style.Theme_Lightboat_ActionDialog), ResponsiveDialog {
     private val binding = DialogSwitchProfileBinding.inflate(activity.layoutInflater)
     private val entries = SwitchAdapter { profile -> dismiss(); open(profile) }
+    private val profiles get() = config.profiles
+    private var filter = ProfileFilter()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,14 +46,14 @@ internal class ProfileSwitchDialog(
         binding.searchPanel.visibility = if (profiles.size > 5) View.VISIBLE else View.GONE
         binding.closeSwitch.setOnClickListener { dismiss() }
         binding.clearSearch.setOnClickListener { binding.searchProfiles.text?.clear() }
+        binding.resetFilters.setOnClickListener {
+            filter = ProfileFilter()
+            binding.searchProfiles.text?.clear()
+            refreshProfiles()
+        }
         binding.searchProfiles.doAfterTextChanged { text ->
-            val query = text.toString().trim()
-            entries.show(profiles.filter {
-                it.name.contains(query, ignoreCase = true) || it.url.contains(query, ignoreCase = true)
-            })
             binding.clearSearch.visibility = if (text.isNullOrEmpty()) View.GONE else View.VISIBLE
-            binding.noProfilesFound.visibility = if (entries.itemCount == 0) View.VISIBLE else View.GONE
-            binding.switchList.visibility = if (entries.itemCount == 0) View.INVISIBLE else View.VISIBLE
+            refreshProfiles()
         }
         binding.searchProfiles.setOnEditorActionListener { _, _, _ ->
             (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
@@ -59,14 +61,32 @@ internal class ProfileSwitchDialog(
             binding.root.requestFocus()
             true
         }
-        entries.show(profiles)
+        refreshProfiles()
         binding.root.requestFocus()
+    }
+
+    private fun changeFilter(next: ProfileFilter) {
+        filter = next.resolve(config)
+        refreshProfiles()
+        binding.switchList.scrollToPosition(0)
+    }
+
+    private fun refreshProfiles() {
+        bindProfileCategoryFilter(binding.categoryFilter, config, filter, ::changeFilter)
+        bindProfileFavoriteFilter(binding.favoriteFilter, filter, ::changeFilter)
+        val visible = filter.apply(config, binding.searchProfiles.text.toString())
+        entries.show(visible)
+        binding.switchSummary.text = if (filter == ProfileFilter() && binding.searchProfiles.text.isNullOrBlank())
+            context.getString(R.string.profile_switch_summary, profiles.size)
+        else context.getString(R.string.profiles_filtered_count, visible.size, profiles.size)
+        binding.noProfilesFound.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
+        binding.switchList.visibility = if (visible.isEmpty()) View.INVISIBLE else View.VISIBLE
     }
 
     override fun onStart() {
         super.onStart()
         updateLayout()
-        profiles.indexOfFirst { it.id == currentId }.takeIf { it >= 0 }?.let {
+        filter.apply(config, binding.searchProfiles.text.toString()).indexOfFirst { it.id == currentId }.takeIf { it >= 0 }?.let {
             binding.switchList.scrollToPosition(it)
         }
     }
@@ -139,11 +159,14 @@ internal class ProfileSwitchDialog(
             row.profileInitial.text = profile.name.substring(0, profile.name.offsetByCodePoints(0, 1)).uppercase()
             row.profileName.text = profile.name
             row.profileHost.text = host
-            row.profilePlatform.text = platform
+            val category = config.categories[profile.categoryId] ?: context.getString(R.string.category_none)
+            row.profilePlatform.text = context.getString(R.string.profile_category_platform, platform, category)
+            row.profileFavorite.visibility = if (profile.favorite) View.VISIBLE else View.GONE
             row.profileState.setText(R.string.current_profile)
             row.profileState.visibility = if (current) View.VISIBLE else View.GONE
             row.profileIndicator.setImageResource(if (current) R.drawable.ic_check_circle else R.drawable.ic_chevron)
-            row.root.contentDescription = context.getString(R.string.profile_switch_description, profile.name, host, platform)
+            row.root.contentDescription = context.getString(R.string.profile_switch_description, profile.name, host,
+                row.profilePlatform.text) + if (profile.favorite) context.getString(R.string.profile_favorite_suffix) else ""
             ViewCompat.setStateDescription(row.root, if (current) context.getString(R.string.current_profile) else null)
             row.root.setOnClickListener { select(profile) }
         }
