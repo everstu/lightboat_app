@@ -68,6 +68,8 @@ class GmLargeTransferTest {
                 GM_addValueChangeListener('shared', (key,oldValue,value,remote) => {if(remote) {window.remoteDeleted=value===undefined; window.remoteLength=value?.length;}});
                 window.share = async () => {await GM.setValue('shared','z'.repeat(400000)); window.sharedSaved=true;};
                 window.deleteShared = () => GM_deleteValue('shared');
+                window.writeCounter = value => GM.setValue('counter', value);
+                window.readCounter = () => GM_getValue('counter', 0);
             """.trimIndent())
             "/text" -> newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", patternStream(size, false), size.toLong())
             "/binary" -> newFixedLengthResponse(Response.Status.OK, "application/octet-stream", patternStream(size, true), size.toLong())
@@ -93,7 +95,9 @@ class GmLargeTransferTest {
     @Before fun setUp() {
         backup = configFile.takeIf(File::exists)?.readBytes()
         server.start()
-        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(AppConfig.EMPTY.upsert(Profile(identity, "GM test", "$base/page", "$base/script.user.js")))
+        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(AppConfig.EMPTY
+            .upsertScript(SharedScript("large", "Large script", "$base/script.user.js"))
+            .upsert(Profile(identity, "GM test", "$base/page", listOf(ProfileScript("large", legacyStorage = true)))))
         launch()
     }
 
@@ -101,7 +105,7 @@ class GmLargeTransferTest {
         scenario?.close(); server.stop()
         backup?.let(configFile::writeBytes) ?: configFile.delete()
         val hash = java.security.MessageDigest.getInstance("SHA-256")
-            .digest("$identity:lightboat-test:Large GM regression".toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
+            .digest("$identity:large:lightboat-test:Large GM regression".toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
         File(context.filesDir, "userscript-values/$hash.json").delete()
         File(context.filesDir, "userscript-values/$hash.json.bak").delete()
     }
@@ -150,6 +154,29 @@ class GmLargeTransferTest {
             val hash = java.security.MessageDigest.getInstance("SHA-256").digest("test-storage-$identity".toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
             File(context.filesDir, "userscript-values/$hash.json").delete()
         }
+    }
+
+    @Test fun simultaneousFrameWritesConvergeToThePersistedValue() {
+        javascript("const frame=document.createElement('iframe');frame.src='/frame';frame.id='frame';document.body.appendChild(frame);true")
+        waitFor("Child script did not start", "document.getElementById('frame').contentWindow.gmReady===true")
+        javascript("""
+            void (async()=>{
+              try {
+                const child=document.getElementById('frame').contentWindow;
+                for(let i=0;i<20;i++) {
+                  await Promise.all([window.writeCounter(i*2+1),child.writeCounter(i*2+2)]);
+                  await new Promise(resolve=>setTimeout(resolve,50));
+                  if(window.readCounter()!==child.readCounter()) throw new Error('Frame snapshots diverged');
+                }
+                window.countersSaved=true;
+              } catch(error) { window.gmError=error.message; }
+            })();true
+        """.trimIndent())
+        waitFor("Concurrent frame writes did not converge", "window.countersSaved===true")
+        val persisted = JSONObject(ScriptValueStore(context,
+            "$identity:large:lightboat-test:Large GM regression").encoded("counter")!!).getInt("value")
+        assertEquals(persisted.toString(), javascript("window.readCounter()"))
+        assertEquals(persisted.toString(), javascript("document.getElementById('frame').contentWindow.readCounter()"))
     }
 
     private fun launch() { scenario = ActivityScenario.launch(MainActivity::class.java); waitFor("Script did not start", "window.gmReady===true") }

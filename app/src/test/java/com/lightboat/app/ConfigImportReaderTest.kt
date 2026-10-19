@@ -11,11 +11,12 @@ import java.io.ByteArrayInputStream
 
 class ConfigImportReaderTest {
     private val userAgent = "Test Android Mobile/1.0"
-    private val config = AppConfig.EMPTY.upsert(Profile("first", "工作", "https://example.com/", "https://example.com/app.js"))
+    private val config = AppConfig.EMPTY.upsertScript(SharedScript("shared", "Common script", "https://example.com/app.js"))
+        .upsert(Profile("first", "工作", "https://example.com/", listOf(ProfileScript("shared"))))
     private val json get() = ConfigCodec.encode(config)
 
     @Test fun localUtf8AndBomPreserveConfigurationOrderAndSelection() {
-        val second = Profile("second", "第二组", "https://example.org/", "https://example.org/app.js")
+        val second = Profile("second", "第二组", "https://example.org/", listOf(ProfileScript("shared", enabled = false)))
         val ordered = config.upsert(second, "工作").toggleFavorite(second.id)
             .reorder(listOf(second.id, "first")).select(second.id)
         val bytes = ("\uFEFF" + ConfigCodec.encode(ordered)).toByteArray(Charsets.UTF_8)

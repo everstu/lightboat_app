@@ -13,6 +13,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -117,6 +118,34 @@ class DebugLogFilteringTest {
         waitFor("Newest row did not survive overflow") { count() == 1 }
         scenario.onActivity { dialog.findViewById<EditText>(R.id.logQuery)!!.setText("script alpha") }
         waitFor("Old filtered records were not released") { count() == 0 }
+    }
+
+    @Test fun returningFromBackgroundResumesRefreshAndAllowsClearing() {
+        scenario.moveToState(Lifecycle.State.CREATED)
+        DebugLog.event("userscript", "info while-in-background")
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        waitFor("Log dialog did not resume after the activity returned") { count() >= 4 }
+        scenario.onActivity { dialog.findViewById<Button>(R.id.clearLogs)!!.performClick() }
+        waitFor("Clear did not complete after background return") { count() == 0 && dialog.findViewById<Button>(R.id.clearLogs)!!.isEnabled }
+        DebugLog.event("userscript", "info after-background-clear")
+        waitFor("Log dialog did not resume after clearing") { count() == 1 }
+    }
+
+    @Test fun concurrentFlushAndClearCannotRestoreOldDiskRecords() {
+        repeat(2200) { DebugLog.event("retention", "before-clear-$it " + "x".repeat(1000)) }
+        val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            val writes = worker.submit { repeat(8) { DebugLog.flush() } }
+            DebugLog.clear()
+            DebugLog.event("retention", "after-concurrent-clear")
+            writes.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            DebugLog.flush()
+            val retained = DebugLog.readAfter(null).lines
+            assertEquals(retained, File(context.filesDir, "debug.log").readLines())
+            assertEquals(1, retained.size)
+            assertTrue(retained.single().endsWith("after-concurrent-clear"))
+            waitFor("Live logs stopped after concurrent persistence") { count() == 1 }
+        } finally { worker.shutdownNow() }
     }
 
     private fun clickOption(text: String) {

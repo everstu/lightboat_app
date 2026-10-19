@@ -38,7 +38,7 @@ class MobileUserAgentTest {
         assertTrue(script.contains("platform:'iPhone'"))
         assertTrue(script.contains("vendor:'Apple Computer, Inc.'"))
         assertTrue(script.contains("'userAgentData'"))
-        assertTrue(script.contains("get: () => undefined"))
+        assertTrue(script.contains("const userAgentData = undefined"))
         assertEquals(null, MobileUserAgent.navigatorIdentityScript(BrowserPlatform.ANDROID, userAgent))
     }
 

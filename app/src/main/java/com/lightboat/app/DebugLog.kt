@@ -20,18 +20,24 @@ import java.util.concurrent.TimeUnit
  */
 object DebugLog {
     internal const val MAX_ENTRIES = 2000
+    private const val WRITE_INTERVAL_MS = 2000L
     private val lock = Any()
+    private val diskLock = Any()
     private val buffer = DebugLogBuffer(MAX_ENTRIES)
     private val writer = Executors.newSingleThreadScheduledExecutor { task -> Thread(task, "debug-log-writer").apply { isDaemon = true } }
     private var writeScheduled = false
     private val urlPattern = Regex("https?://[^\\s\\\"']+", RegexOption.IGNORE_CASE)
-    private val secretPattern = Regex("(?i)\\b(authorization|cookie)\\s*[:=]\\s*[^\\s,;]+")
+    // Header values may contain spaces, commas or semicolons; redact the full line.
+    private val secretPattern = Regex("(?i)\\b((?:proxy-)?authorization|(?:set-)?cookie)[\"']?\\s*[:=][^\\r\\n]*")
     private val bearerPattern = Regex("(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+")
     private val controlPattern = Regex("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]")
     private val clock = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private var file: File? = null
     private var initialized = false
     private var generation = 0L
+    private var revision = 0L
+    private var persistedRevision = -1L
+    private data class Snapshot(val file: File, val revision: Long, val lines: List<String>)
 
     internal data class Cursor(val generation: Long, val offset: Long)
     internal data class Update(val cursor: Cursor, val reset: Boolean, val lines: List<String>) {
@@ -45,16 +51,17 @@ object DebugLog {
         synchronized(lock) {
             if (initialized) return
             file = File(app.filesDir, "debug.log")
-            runCatching { file!!.writeText("", Charsets.UTF_8) }
+            revision++
             initialized = true
             previousCrash = preferences.getString("previous-crash", null)
             preferences.edit().remove("previous-crash").apply()
         }
+        flush()
         event("app", "process started")
         previousCrash?.let { event("previous-crash", it) }
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
-            val trace = StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString().take(16_000)
+            val trace = sanitize(StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString()).take(16_000)
             event("crash", "thread=${thread.name} $trace")
             flush()
             preferences.edit().putString("previous-crash", "thread=${thread.name} $trace").commit()
@@ -67,47 +74,60 @@ object DebugLog {
     fun event(area: String, message: String) {
         synchronized(lock) {
             if (file == null) return
-            val clean = message.replace(urlPattern) {
-                    safeUrl(it.value)
-                }
-                .replace(secretPattern) {
-                    "${it.groupValues[1]}=<redacted>"
-                }
-                .replace(bearerPattern, "Bearer <redacted>")
-                .replace(controlPattern, " ")
-                .replace('\n', ' ').replace('\r', ' ').take(4000)
+            val clean = sanitize(message).take(4000)
             buffer.append("${clock.format(Date())} [$area] $clean")
+            revision++
             if (!writeScheduled) {
                 writeScheduled = true
-                writer.schedule({ synchronized(lock) { writeScheduled = false; writeFile() } }, 250, TimeUnit.MILLISECONDS)
+                writer.schedule({
+                    synchronized(lock) { writeScheduled = false }
+                    writeFile()
+                }, WRITE_INTERVAL_MS, TimeUnit.MILLISECONDS)
             }
         }
     }
+
+    internal fun sanitize(message: String): String = message.replace(urlPattern) { safeUrl(it.value) }
+        .replace(secretPattern) { "${it.groupValues[1]}=<redacted>" }
+        .replace(bearerPattern, "Bearer <redacted>")
+        .replace(controlPattern, " ")
+        .replace('\n', ' ').replace('\r', ' ')
 
     internal fun readAfter(cursor: Cursor?): Update = synchronized(lock) {
         val update = buffer.read(cursor?.takeIf { it.generation == generation }?.offset)
         Update(Cursor(generation, update.sequence), update.reset, update.lines)
     }
 
-    internal fun clear(): Unit = synchronized(lock) {
-        buffer.clear()
-        generation++
+    internal fun clear() {
+        synchronized(lock) {
+            buffer.clear()
+            generation++
+            revision++
+        }
         writeFile()
-        Unit
     }
 
-    internal fun flush() = synchronized(lock) { writeFile() }
+    internal fun flush() = writeFile()
 
     private fun writeFile() {
-        val atomic = file?.let(::AtomicFile) ?: return
-        runCatching {
-            val output = atomic.startWrite()
-            try {
-                val text = output.bufferedWriter(Charsets.UTF_8)
-                buffer.read(null).lines.forEach { text.append(it).append('\n') }
-                text.flush()
-                atomic.finishWrite(output)
-            } catch (error: Exception) { atomic.failWrite(output); throw error }
+        // Serialize disk writes separately. Logging and live UI reads never wait for fsync.
+        synchronized(diskLock) {
+            val snapshot = synchronized(lock) {
+                val target = file ?: return
+                if (revision == persistedRevision) return
+                Snapshot(target, revision, buffer.read(null).lines)
+            }
+            val atomic = AtomicFile(snapshot.file)
+            val saved = runCatching {
+                val output = atomic.startWrite()
+                try {
+                    val text = output.bufferedWriter(Charsets.UTF_8)
+                    snapshot.lines.forEach { text.append(it).append('\n') }
+                    text.flush()
+                    atomic.finishWrite(output)
+                } catch (error: Exception) { atomic.failWrite(output); throw error }
+            }.isSuccess
+            if (saved) synchronized(lock) { persistedRevision = snapshot.revision }
         }
     }
 

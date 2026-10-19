@@ -9,16 +9,35 @@ data class ScriptBundle(
     val requirements: List<String>,
     val resources: JSONObject
 ) {
-    fun bootstrap(runtime: String, token: String, scriptUrl: String): String {
+    fun bootstrap(runtime: String, token: String, scriptUrl: String, bridgeName: String = "LightboatGM",
+        sourceName: String = "lightboat-userscript.js"): String {
         val spec = JSONObject().put("meta", metadata.json()).put("token", token).put("values", JSONObject())
-            .put("resources", resources).put("url", scriptUrl).put("parameters", apiJson())
+            .put("resources", resources).put("url", scriptUrl).put("bridgeName", bridgeName).put("parameters", apiJson())
         val body = (requirements + source).joinToString("\n;\n")
         // Compile with the injected document-start source, not eval/Function at runtime.
         // Parameters keep each granted API private to this script's lexical scope.
+        // The marker records synchronous runner setup, including when its entry runs later.
         return "(function(){const spec=$spec;\n$runtime\n" +
-            "LightboatRuntime(spec,function(${API_PARAMETERS.joinToString(",")}){\n$body\n});\n})();\n" +
-            "//# sourceURL=lightboat-userscript.js"
+            "LightboatRuntime(spec,function(${API_PARAMETERS.joinToString(",")}){\n$body\n});\n" +
+            "window[${JSONObject.quote(bridgeName + "_initialized")}]=true;\n})();\n" +
+            "//# sourceURL=$sourceName"
     }
+
+    fun initializationCheck(matcher: String, token: String, bridgeName: String): String = """
+        (function(){
+        $matcher
+        const marker=${JSONObject.quote(bridgeName + "_initialized")};
+        setTimeout(function(){
+          const initialized=window[marker]===true;
+          delete window[marker];
+          if(initialized || !LightboatMatches(${metadata.json()},location.href,window===window.top)) return;
+          try { window[${JSONObject.quote(bridgeName)}].postMessage(JSON.stringify({
+            token:${JSONObject.quote(token)},doc:Date.now()+'-'+Math.random(),url:location.href,
+            op:'bootstrapFailed',text:'脚本未能完成初始化，可能存在语法或启动错误。请查看调试日志。'
+          })); } catch (_) {}
+        },0);
+        })();
+    """.trimIndent()
 
     companion object {
         val API_PARAMETERS = listOf("GM", "GM_info", "unsafeWindow", "GM_getValue", "GM_setValue", "GM_deleteValue",

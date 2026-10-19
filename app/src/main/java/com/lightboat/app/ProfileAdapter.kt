@@ -61,9 +61,8 @@ class ProfileAdapter(
         row.topProfile.setOnClickListener { moveToTop(profile) }
         row.root.isActivated = profile.id == currentId
         row.profileUrl.text = profile.url.substringBefore('?').substringBefore('#')
-        row.profileScript.text = if (profile.scriptUrl.isBlank()) context.getString(R.string.profile_script_none)
-        else context.getString(R.string.profile_script_host,
-            profile.scriptUrl.substringBefore('?').substringBefore('#'))
+        row.profileScript.text = if (profile.scripts.isEmpty()) context.getString(R.string.profile_script_none)
+        else context.getString(R.string.profile_scripts_count, profile.scripts.count { it.enabled }, profile.scripts.size)
         row.profileBadge.text = context.getString(when (profile.platform) {
                 BrowserPlatform.APPLE -> R.string.platform_apple
                 BrowserPlatform.ANDROID -> R.string.platform_android

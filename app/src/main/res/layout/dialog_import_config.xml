@@ -34,6 +34,8 @@
             <TextView android:id="@+id/importFeedback" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginTop="12dp" android:textSize="14sp" android:textColor="@color/ink" android:lineSpacingExtra="4dp"
                 android:accessibilityLiveRegion="polite" android:visibility="gone" />
+            <com.lightboat.app.BackupOptionsView android:id="@+id/importBackupOptions" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="14dp" android:visibility="gone" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp"
                 android:text="@string/import_note" android:textSize="12sp" android:textColor="@color/muted" android:lineSpacingExtra="3dp" />
         </LinearLayout>

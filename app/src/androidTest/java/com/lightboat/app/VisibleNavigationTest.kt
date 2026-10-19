@@ -15,6 +15,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 /** Exercises the real Activity, document-start injection and Chromium HTTP callbacks. */
@@ -28,6 +29,7 @@ class VisibleNavigationTest {
     private val targetRequested = CountDownLatch(1)
     private val releasePage = CountDownLatch(1)
     @Volatile private var verifiedCookieReceived = false
+    private val readyUserAgents = CopyOnWriteArrayList<String>()
     private val server = object : NanoHTTPD("127.0.0.1", 0) {
         override fun serve(session: IHTTPSession): Response = when (session.uri) {
             "/user.js" -> newFixedLengthResponse(Response.Status.OK, "text/javascript", """
@@ -54,6 +56,7 @@ class VisibleNavigationTest {
             }
             "/ready" -> {
                 verifiedCookieReceived = session.headers["cookie"].orEmpty().contains("lightboat_test_verified=yes")
+                readyUserAgents += session.headers["user-agent"].orEmpty()
                 html(Response.Status.OK, "<h1 id='ready'>Ready</h1>")
             }
             else -> html(Response.Status.NOT_FOUND, "<h1>Not found</h1>")
@@ -115,12 +118,44 @@ class VisibleNavigationTest {
         }
     }
 
+    @Test fun platformProfilesWithoutScriptsKeepVerificationCookiesAndTheirWebView() {
+        for (platform in BrowserPlatform.entries) {
+            val userAgent = when (platform) {
+                BrowserPlatform.APPLE -> MobileUserAgent.appleSafari()
+                BrowserPlatform.ANDROID -> AppConfig.DEFAULT_USER_AGENT
+                BrowserPlatform.WINDOWS -> MobileUserAgent.windowsChrome(AppConfig.DEFAULT_USER_AGENT)
+            }
+            launchUrl("$baseUrl/challenge", "", userAgent, platform)
+            waitUntil("The verification page was not visible for $platform") { activity ->
+                browser(activity)?.progress == 100 && browser(activity)?.isShown == true
+            }
+            var originalView: AppWebView? = null
+            scenario!!.onActivity { originalView = browser(it) }
+            javascript("document.getElementById('verify').click(); true")
+            waitUntil("Verification did not finish for $platform") { activity ->
+                browser(activity)?.url == "$baseUrl/ready" && browser(activity)?.progress == 100
+            }
+            for (step in 1..3) {
+                javascript("location.href='/ready?step=$step'; true")
+                waitUntil("Verification navigation $step failed for $platform") { activity ->
+                    browser(activity)?.url == "$baseUrl/ready?step=$step" && browser(activity)?.progress == 100
+                }
+                assertTrue("Verification cookie was lost for $platform", verifiedCookieReceived)
+                assertEquals(userAgent, readyUserAgents.last())
+                assertEquals("true", javascript("document.cookie.includes('lightboat_test_verified=yes')"))
+                scenario!!.onActivity { assertSame("App recreated the verified WebView", originalView, browser(it)) }
+            }
+            scenario!!.close(); scenario = null
+        }
+    }
+
     private fun launch(path: String) = launchUrl("$baseUrl$path", "$baseUrl/user.js")
 
-    private fun launchUrl(url: String, script: String) {
-        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(AppConfig.EMPTY.upsert(
-            Profile("navigation-test", "Navigation test", url, script)
-        ))
+    private fun launchUrl(url: String, script: String, userAgent: String = AppConfig.DEFAULT_USER_AGENT,
+        platform: BrowserPlatform = BrowserPlatform.ANDROID) {
+        val config = if (script.isBlank()) AppConfig.EMPTY else AppConfig.EMPTY.upsertScript(SharedScript("visible", "Visible script", script))
+        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(config.upsert(
+            Profile("navigation-test", "Navigation test", url, config.scriptLibrary.map { ProfileScript(it.id) }, userAgent, platform)))
         scenario = ActivityScenario.launch(MainActivity::class.java)
     }
 

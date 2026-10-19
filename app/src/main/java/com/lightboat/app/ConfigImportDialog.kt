@@ -12,30 +12,40 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import com.lightboat.app.databinding.DialogImportConfigBinding
+import com.lightboat.app.backup.BackupRepository
+import com.lightboat.app.backup.BackupTransaction
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.SocketTimeoutException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.io.File
+import java.util.UUID
 
 internal class ConfigImportDialog(
     private val activity: AppCompatActivity,
     private val defaultUserAgent: String,
     private val currentCount: () -> Int,
     private val chooseFile: () -> Unit,
+    private val prepareBackup: () -> Unit,
+    private val backupRestored: (AppConfig) -> Unit,
+    private val recoveryRequired: () -> Unit,
     private val applyImport: (AppConfig) -> Boolean,
 ) : AlertDialog(activity) {
     private val binding = DialogImportConfigBinding.inflate(activity.layoutInflater)
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS).build()
+        .readTimeout(90, TimeUnit.SECONDS).callTimeout(10, TimeUnit.MINUTES).build()
+    private val repository = BackupRepository(activity, defaultUserAgent)
+    private val workspace = File(activity.cacheDir, "local-backup-${UUID.randomUUID()}")
     private var call: Call? = null
-    private var imported: AppConfig? = null
+    private var imported: BackupImportData? = null
     private var fileMode = false
     private var busy = false
-    private var closed = false
+    @Volatile private var closed = false
+    private var critical = false
     private var requestId = 0
 
     init {
@@ -51,14 +61,13 @@ internal class ConfigImportDialog(
         binding.importAction.setOnClickListener {
             val ready = imported
             if (ready != null) {
-                if (applyImport(ready)) dismiss()
+                if (ready.archive != null) restoreBackup(ready) else if (applyImport(ready.config)) dismiss()
             } else if (fileMode) {
                 chooseLocalFile()
             } else readUrl()
         }
         binding.importCancel.setOnClickListener {
             if (imported != null) {
-                imported = null
                 selectSource(fileMode)
             } else dismiss()
         }
@@ -76,7 +85,7 @@ internal class ConfigImportDialog(
         selectSource(true)
         load(R.string.import_loading_file) {
             (activity.contentResolver.openInputStream(uri) ?: error(context.getString(R.string.import_read_failed)))
-                .use { ConfigImportReader.fromStream(it, defaultUserAgent) }
+                .use { BackupImportReader.fromStream(it, defaultUserAgent, workspace, repository) }
         }
     }
 
@@ -91,7 +100,7 @@ internal class ConfigImportDialog(
         hideKeyboard()
         val download = try {
             client.newCall(Request.Builder().url(url)
-                .header("Accept", "application/json, text/plain;q=0.9, */*;q=0.5")
+                .header("Accept", "application/zip, application/json;q=0.9, application/octet-stream;q=0.8, */*;q=0.5")
                 .header("User-Agent", defaultUserAgent)
                 .header("Cache-Control", "no-cache").build())
         } catch (_: IllegalArgumentException) {
@@ -99,10 +108,10 @@ internal class ConfigImportDialog(
             return
         }
         call = download
-        load(R.string.import_loading_url) { ConfigImportReader.fromUrl(download, defaultUserAgent) }
+        load(R.string.import_loading_url) { BackupImportReader.fromUrl(download, defaultUserAgent, workspace, repository) }
     }
 
-    private fun load(label: Int, read: () -> AppConfig) {
+    private fun load(label: Int, read: () -> BackupImportData) {
         if (busy || closed) return
         val id = ++requestId
         busy = true
@@ -115,9 +124,17 @@ internal class ConfigImportDialog(
                 if (closed || id != requestId) return@post
                 busy = false
                 call = null
-                result.onSuccess { config ->
-                    imported = config
-                    val summary = if (config.profiles.isEmpty()) {
+                result.onSuccess { data ->
+                    imported = data
+                    val config = data.config
+                    val summary = if (data.archive != null) {
+                        val info = data.archive.info
+                        binding.importBackupOptions.configure(info.options, info.options, restore = true)
+                        context.getString(R.string.webdav_backup_summary,
+                            java.text.DateFormat.getDateTimeInstance().format(java.util.Date(info.createdAt)), info.device,
+                            info.profiles, info.scripts, info.stores, android.text.format.Formatter.formatShortFileSize(context, info.bytes)) +
+                            "\n\n" + context.getString(R.string.backup_import_replace_note)
+                    } else if (config.profiles.isEmpty()) {
                         context.getString(R.string.import_empty_confirm, currentCount())
                     } else context.getString(R.string.import_message, config.profiles.size, currentCount(),
                         config.lastProfile?.name ?: context.getString(R.string.import_no_startup))
@@ -138,6 +155,7 @@ internal class ConfigImportDialog(
 
     private fun selectSource(useFile: Boolean) {
         if (busy) return
+        imported?.archive?.directory?.let { directory -> worker.execute { directory.deleteRecursively() } }
         fileMode = useFile
         imported = null
         binding.importFeedback.visibility = View.GONE
@@ -146,6 +164,8 @@ internal class ConfigImportDialog(
 
     private fun updateControls() {
         val preview = imported != null
+        binding.importBackupOptions.visibility = if (imported?.archive != null) View.VISIBLE else View.GONE
+        binding.importBackupOptions.setControlsEnabled(!busy)
         binding.urlSource.isSelected = !fileMode
         binding.fileSource.isSelected = fileMode
         binding.urlSource.isEnabled = !busy && !preview
@@ -159,16 +179,41 @@ internal class ConfigImportDialog(
         binding.importAction.apply {
             isEnabled = !busy
             setText(when {
-                preview && imported!!.profiles.isEmpty() -> R.string.import_empty_action
+                preview && imported!!.archive != null -> R.string.backup_import_confirm
+                preview && imported!!.config.profiles.isEmpty() -> R.string.import_empty_action
                 preview -> R.string.import_confirm
                 fileMode -> R.string.import_choose_file
                 else -> R.string.import_check
             })
         }
         binding.importCancel.setText(if (preview) R.string.back_import else R.string.import_cancel)
+        binding.importCancel.isEnabled = !critical
+        setCancelable(!critical)
         val title = context.getString(if (preview) R.string.import_title else R.string.import_config)
         binding.importTitle.text = title
         ViewCompat.setAccessibilityPaneTitle(binding.root, title)
+    }
+
+    private fun restoreBackup(data: BackupImportData) {
+        val archive = data.archive ?: return
+        if (busy || closed) return
+        val options = binding.importBackupOptions.options
+        prepareBackup()
+        busy = true; critical = true
+        showFeedback(context.getString(R.string.webdav_restoring), false); updateControls()
+        worker.execute {
+            val result = runCatching { repository.restore(archive, options) { !closed } }
+            main.post {
+                if (closed) return@post
+                busy = false; critical = false
+                result.onSuccess { config -> backupRestored(config); dismiss() }.onFailure { error ->
+                    imported = null
+                    showFeedback(error.message ?: context.getString(R.string.import_read_failed), true)
+                    if (BackupTransaction.requiresRecovery(context.filesDir)) { dismiss(); recoveryRequired() }
+                }
+                updateControls()
+            }
+        }
     }
 
     private fun showFeedback(message: String, error: Boolean) {
@@ -184,12 +229,12 @@ internal class ConfigImportDialog(
     }
 
     override fun onStop() {
+        if (closed) { super.onStop(); return }
         closed = true
         requestId++
-        call?.cancel()
+        HttpClientCleanup.close(client, listOfNotNull(call))
         main.removeCallbacksAndMessages(null)
-        worker.shutdownNow()
-        client.connectionPool.evictAll()
+        worker.execute { workspace.deleteRecursively() }; worker.shutdown()
         super.onStop()
     }
 }

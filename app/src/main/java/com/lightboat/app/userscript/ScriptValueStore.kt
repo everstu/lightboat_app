@@ -13,11 +13,16 @@ import java.io.StringWriter
 import java.math.BigDecimal
 import java.security.MessageDigest
 
-class ScriptValueStore(context: Context, identity: String) {
+class ScriptValueStore(context: Context, identity: String, legacyIdentity: String? = null) {
     private val hash = MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
         .joinToString("") { "%02x".format(it.toInt() and 255) }
     private val directory = File(context.applicationContext.filesDir, "userscript-values")
     private val file = AtomicFile(File(directory, "$hash.json"))
+    private val legacyFile = legacyIdentity?.let { value ->
+        val legacyHash = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        AtomicFile(File(directory, "$legacyHash.json"))
+    }
     // Encoded values share references across snapshots and writes; no deep JSON copies.
     private var values: Map<String, String>? = null
 
@@ -30,8 +35,19 @@ class ScriptValueStore(context: Context, identity: String) {
     private fun current(): Map<String, String> = values ?: load().also { values = it }
 
     private fun load(): Map<String, String> {
-        if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) return emptyMap()
         return try {
+            if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) {
+                val legacy = legacyFile?.takeIf { it.baseFile.exists() || File(it.baseFile.path + ".bak").exists() }
+                    ?: return emptyMap()
+                // Storage-worker-only, atomic migration. Keep the original for old app backups;
+                // future references use the new ID even after removing and reselecting a script.
+                legacy.openRead().use { input ->
+                    require(input.channel.size() <= ScriptLimits.MAX_BYTES) { "GM storage exceeds 10 MiB" }
+                    val output = file.startWrite()
+                    try { input.copyTo(LimitedScriptOutput(output)); file.finishWrite(output) }
+                    catch (error: Exception) { file.failWrite(output); throw error }
+                }
+            }
             file.openRead().use { input ->
                 require(input.channel.size() <= ScriptLimits.MAX_BYTES) { "GM storage exceeds 10 MiB" }
                 JsonReader(input.reader(Charsets.UTF_8)).use { reader ->

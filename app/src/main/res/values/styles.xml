@@ -55,6 +55,20 @@
     <style name="ConfigSecondary" parent="ConfigAction">
         <item name="android:background">@drawable/bg_config_secondary</item>
     </style>
+    <style name="ProfileFloatingAction">
+        <item name="android:layout_width">78dp</item>
+        <item name="android:layout_height">48dp</item>
+    </style>
+    <style name="ScriptOrderAction" parent="Widget.AppCompat.ImageButton">
+        <item name="android:layout_width">36dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:paddingHorizontal">8dp</item>
+        <item name="android:paddingVertical">14dp</item>
+        <item name="android:background">@drawable/bg_script_order_action</item>
+    </style>
+    <style name="ScriptOrderAction.Remove" parent="ScriptOrderAction">
+        <item name="android:background">@drawable/bg_script_remove_action</item>
+    </style>
     <style name="ProfileCardAction" parent="ConfigAction">
         <item name="android:minWidth">104dp</item>
         <item name="android:paddingStart">20dp</item>

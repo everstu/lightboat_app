@@ -65,6 +65,35 @@ function deliverChunked(h, message, transfer = 'transfer-1') {
   }
 }
 
+test('Two userscripts use separate bridge handlers, storage snapshots, grants and menu callbacks', async () => {
+  const h = harness({ runAt: 'document-start', grant: ['GM_getValue', 'GM_registerMenuCommand'] },
+    { values: { owner: { type: 'json', value: 'first' } } });
+  h.run(`window.firstOwner=GM_getValue('owner');window.firstMenu=GM_registerMenuCommand('Same',()=>window.firstClicked=true);`);
+  await flush();
+  const firstHandler = h.context.window.LightboatGM.onmessage;
+  const secondMessages = [];
+  const secondBridge = { postMessage(text) {
+    const msg = JSON.parse(text); secondMessages.push(msg);
+    if (['hello', 'menuRegister'].includes(msg.op)) secondBridge.onmessage({ data: JSON.stringify({ doc: msg.doc, id: msg.id,
+      result: msg.op === 'hello' ? { owner: { type: 'json', value: 'second' } } : null }) });
+  } };
+  h.context.window.ScriptTwoBridge = secondBridge;
+  h.context.secondSpec = { ...h.spec, token: 'second-token', bridgeName: 'ScriptTwoBridge' };
+  vm.runInContext(`LightboatRuntime(secondSpec,function(${h.spec.parameters.join(',')}){
+    window.secondOwner=GM_getValue('owner');window.secondMenu=GM_registerMenuCommand('Same',()=>window.secondClicked=true);
+  });`, h.context);
+  await flush();
+  assert.equal(h.context.window.firstOwner, 'first');
+  assert.equal(h.context.window.secondOwner, 'second');
+  assert.equal(h.context.window.LightboatGM.onmessage, firstHandler);
+  secondBridge.onmessage({ data: JSON.stringify({ doc: 'frame-1', event: 'menu', menuId: h.context.window.secondMenu }) });
+  assert.equal(h.context.window.secondClicked, true);
+  assert.equal(h.context.window.firstClicked, undefined);
+  h.reply({ event: 'menu', menuId: h.context.window.firstMenu });
+  assert.equal(h.context.window.firstClicked, true);
+  assert.ok(secondMessages.every(msg => msg.token === 'second-token'));
+});
+
 test('Restores a large per-key snapshot before document-start and chunks large writes transparently', async () => {
   const h = harness({runAt:'document-start',grant:['GM_getValue','GM.setValue']}, {streamSnapshot:true});
   h.run('window.cached=GM_getValue("large"); window.save=()=>GM.setValue("large",window.cached);');
@@ -290,6 +319,36 @@ test('Restored documents reconnect storage and menu callbacks without rerunning 
   assert.equal(h.context.window.clicked, true);
 });
 
+test('Restoring a streamed snapshot only notifies actual value changes and preserves old values until ready', async () => {
+  const h = harness({ runAt: 'document-start', grant: ['GM_getValue', 'GM_addValueChangeListener'] },
+    { streamSnapshot: true, timers: fakeTimers().api });
+  h.run(`window.changes=[]; window.read=key=>GM_getValue(key);
+    for(const key of ['stable','current','removed','added','empty'])
+      GM_addValueChangeListener(key,(...args)=>window.changes.push(args));`);
+  const initial = { stable: { a: ['large'.repeat(10000), true], b: 2 }, current: 7, removed: true };
+  for (const [key, value] of Object.entries(initial)) deliverChunked(h, { event: 'snapshotValue', key, value: { type: 'json', value } });
+  deliverChunked(h, { event: 'snapshotValue', key: 'empty', value: { type: 'undefined' } });
+  h.reply({ id: h.messages.find(m => m.op === 'hello').id, result: {} });
+  await flush();
+  h.listeners['window:pagehide']({ persisted: true });
+  await flush();
+  h.listeners['window:pageshow']({ persisted: true });
+  assert.equal(h.context.window.read('current'), 7);
+  for (const [key, value] of Object.entries({ stable: { b: 2, a: initial.stable.a }, current: 9, added: 42 }))
+    deliverChunked(h, { event: 'snapshotValue', key, value: { type: 'json', value } });
+  deliverChunked(h, { event: 'snapshotValue', key: 'empty', value: { type: 'undefined' } });
+  assert.equal(h.context.window.changes.length, 0, 'Snapshot must not expose partially restored values');
+  h.reply({ id: h.messages.filter(m => m.op === 'hello').at(-1).id, result: {} });
+  await flush();
+  assert.equal(h.context.window.read('current'), 9);
+  assert.equal(h.context.window.read('removed'), undefined);
+  assert.equal(h.context.window.changes.length, 3);
+  const changes = Object.fromEntries(h.context.window.changes.map(([key, old, value, remote]) => [key, [old, value, remote]]));
+  assert.deepEqual(changes.current, [7, 9, true]);
+  assert.deepEqual(changes.removed, [true, undefined, true]);
+  assert.deepEqual(changes.added, [undefined, 42, true]);
+});
+
 test('A document suspended during its initial snapshot executes once after restoration', async () => {
   const h = harness({ runAt: 'document-start', grant: ['GM_getValue', 'GM_registerMenuCommand'] },
     { streamSnapshot: true });
@@ -400,6 +459,17 @@ test('Script errors are reported without aborting browser page execution', () =>
   const h = harness({ runAt: 'document-start', grant: ['none'] });
   h.run('throw new Error("DOM not ready");');
   assert.ok(h.messages.some(msg => msg.op === 'log' && msg.level === 'error' && msg.text.includes('DOM not ready')));
+  assert.ok(h.messages.some(msg => msg.op === 'executionFailed' && msg.text.includes('DOM not ready')));
+});
+
+test('Only startup failures request a visit decision; ordinary GM request errors stay in callbacks', async () => {
+  const h = harness({ runAt:'document-start', grant:['GM.xmlHttpRequest'] });
+  h.run('window.request=GM.xmlHttpRequest({url:"/missing",onerror:()=>window.failed=true}).catch(()=>{});');
+  const request=h.messages.find(msg=>msg.op==='xhr');
+  h.reply({id:request.id,event:'error',error:'network unavailable'});
+  await flush();
+  assert.equal(h.context.window.failed,true);
+  assert.ok(!h.messages.some(msg=>msg.op==='executionFailed'));
 });
 
 test('Bulk storage retains reserved object keys without prototype mutation', async () => {

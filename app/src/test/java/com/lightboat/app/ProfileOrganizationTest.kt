@@ -7,7 +7,7 @@ import java.util.UUID
 
 class ProfileOrganizationTest {
     private fun profile(id: String, favorite: Boolean = false, categoryId: String? = null) =
-        Profile(id, "配置$id", "https://example.com/$id", "", categoryId = categoryId, favorite = favorite)
+        Profile(id, "配置$id", "https://example.com/$id", categoryId = categoryId, favorite = favorite)
 
     private val grouped = AppConfig("b", listOf(
         profile("a", true, "work"), profile("b"), profile("c", true, "work"),

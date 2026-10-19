@@ -2,7 +2,7 @@ function LightboatRuntime(spec, entry) {
   'use strict';
   const meta = spec.meta;
   if (!LightboatMatches(meta, location.href, window === window.top)) return;
-  const bridge = window.LightboatGM;
+  const bridge = window[spec.bridgeName || 'LightboatGM'];
   const doc = (globalThis.crypto?.randomUUID?.() || Date.now() + '-' + Math.random()).toString();
   const pending = new Map();
   const incoming = new Map();
@@ -12,6 +12,7 @@ function LightboatRuntime(spec, entry) {
   const valueListeners = new Map();
   const menus = new Map();
   let suspended = false, reconnecting = false, executed = false, scheduled = false;
+  let restoredValues = null;
   const unavailableResourceWarnings = new Set();
   let sequence = 0;
   const grants = new Set(meta.grant || []);
@@ -21,6 +22,10 @@ function LightboatRuntime(spec, entry) {
   const report = (level, text) => {
     try { post({ op: 'log', level, text: String(text).slice(0, 8000) }); }
     catch (_) { console.error('[Lightboat]', text); }
+  };
+  const executionFailed = error => {
+    report('error', errorText(error));
+    try { post({ op: 'executionFailed', text: errorText(error).slice(0, 1000) }); } catch (_) {}
   };
   const invoke = (fn, args) => {
     try { return fn(...args); } catch (error) { report('error', errorText(error)); }
@@ -53,11 +58,23 @@ function LightboatRuntime(spec, entry) {
       if (listener.key === key) invoke(listener.callback, [key, decode(previous), decode(next), remote]);
     }
   };
+  // Compare decoded JSON without serializing large storage values a second time.
+  const sameValue = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every(key =>
+      Object.prototype.hasOwnProperty.call(b, key) && sameValue(a[key], b[key]));
+  };
   const receive = message => {
     if (message.event === 'value' || message.event === 'snapshotValue') {
       // Native replies are ordered. Until our newer local writes are acknowledged,
       // an earlier frame notification must not roll back the optimistic snapshot.
       if (valueWrites.has(message.key)) return;
+      if (restoredValues) {
+        if (message.deleted) delete restoredValues[message.key]; else restoredValues[message.key] = message.value;
+        return;
+      }
       const old = values[message.key];
       if (message.deleted) delete values[message.key]; else values[message.key] = message.value;
       notifyValue(message.key, old, values[message.key], true);
@@ -363,7 +380,7 @@ function LightboatRuntime(spec, entry) {
     if (suspended || executed) return;
     executed = true;
     try { entry.apply(window, args); report('info', meta.name + ' 已执行（' + meta.runAt + '；' + executionContext + '）'); }
-    catch (error) { report('error', errorText(error)); }
+    catch (error) { executionFailed(error); }
   };
   const schedule = () => {
     if (suspended || scheduled || executed) return;
@@ -402,17 +419,31 @@ function LightboatRuntime(spec, entry) {
     reconnecting = true;
     // A restored document retains its JS hooks and callbacks. Reconnect its native
     // session and menu registrations without executing the userscript a second time.
-    for (const key of Object.keys(values)) delete values[key];
+    restoredValues = Object.create(null);
     rpc('hello').promise.then(snapshot => {
-      Object.assign(values, snapshot);
+      Object.assign(restoredValues, snapshot);
+      const next = restoredValues;
+      restoredValues = null;
+      const changes = [];
+      for (const key of new Set([...Object.keys(values), ...Object.keys(next)])) {
+        if (valueWrites.has(key)) continue;
+        const previous = values[key], value = next[key];
+        const existed = Object.prototype.hasOwnProperty.call(values, key);
+        const exists = Object.prototype.hasOwnProperty.call(next, key);
+        if (existed === exists && sameValue(previous, value)) continue;
+        if (exists) values[key] = value; else delete values[key];
+        changes.push([key, previous, value]);
+      }
+      // All keys are current before a callback can read the restored snapshot.
+      for (const [key, previous, value] of changes) notifyValue(key, previous, value, true);
       for (const [menuId, menu] of menus) sendDetached('menuRegister', { menuId, title: menu.title });
       suspended = false;
       schedule();
-    }).catch(error => report('error', errorText(error))).finally(() => { reconnecting = false; });
+    }).catch(error => report('error', errorText(error))).finally(() => { restoredValues = null; reconnecting = false; });
   });
   const hello = rpc('hello').promise;
   report('info', meta.name + ' 已匹配（' + executionContext + '）；等待 ' + meta.runAt);
   if ([...grants].some(grant => /(?:Value|Values)/.test(grant))) {
-    hello.then(snapshot => { Object.assign(values, snapshot); schedule(); }).catch(error => { if (!suspended) report('error', errorText(error)); });
+    hello.then(snapshot => { Object.assign(values, snapshot); schedule(); }).catch(error => { if (!suspended) executionFailed(error); });
   } else { hello.catch(error => report('error', errorText(error))); schedule(); }
 }

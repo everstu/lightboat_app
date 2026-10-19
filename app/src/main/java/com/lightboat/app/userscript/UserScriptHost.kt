@@ -15,21 +15,51 @@ import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import com.lightboat.app.AppWebView
 import com.lightboat.app.Profile
+import com.lightboat.app.SharedScript
+import com.lightboat.app.ProfileScript
 import com.lightboat.app.DebugLog
 import org.json.JSONObject
 import java.net.URI
 import java.util.UUID
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.RejectedExecutionException
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
 
-private object ScriptStorage {
+internal object ScriptStorage {
     // One queue preserves write/read order even when a profile recreates its host.
-    val worker = ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS, ArrayBlockingQueue(64),
-        { task -> Thread(task, "userscript-storage").apply { isDaemon = true } },
-        { _, _ -> throw RejectedExecutionException("GM 存储繁忙，请稍后重试") }
-    ).apply { allowCoreThreadTimeOut(true) }
+    private val queue = ScriptStorageQueue()
+    private val main = Handler(Looper.getMainLooper())
+    private val cleanups = ArrayDeque<() -> Unit>() // Main-thread-only; no stored values.
+    private val retryCleanup = Runnable { drainCleanups() }
+    fun submit(task: () -> Unit) = queue.submit(task)
+    /** Called by a background backup worker after the browser hosts have been closed. */
+    fun <T> exclusive(action: () -> T): T {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "不能在主线程等待脚本存储" }
+        val result = java.util.concurrent.CompletableFuture<T>()
+        check(submit { try { result.complete(action()) } catch (error: Throwable) { result.completeExceptionally(error) } }) {
+            "脚本存储繁忙，请稍后重试"
+        }
+        // Once a restore is queued it must finish or roll back, even if the UI closes.
+        var interrupted = false
+        try {
+            while (true) {
+                try { return result.get() }
+                catch (_: InterruptedException) { interrupted = true }
+                catch (error: java.util.concurrent.ExecutionException) { throw (error.cause ?: error) }
+            }
+        } finally { if (interrupted) Thread.currentThread().interrupt() }
+    }
+    fun cleanup(task: () -> Unit) {
+        // A retired document must release its upload even if the request queue is full.
+        // This handler outlives individual hosts; their close() cannot cancel the retry.
+        cleanups.addLast(task)
+        drainCleanups()
+    }
+    private fun drainCleanups() {
+        main.removeCallbacks(retryCleanup)
+        while (cleanups.isNotEmpty()) {
+            val task = cleanups.first()
+            if (!submit { runCatching(task) }) { main.postDelayed(retryCleanup, 100L); return }
+            cleanups.removeFirst()
+        }
+    }
 }
 
 private object UserScriptAssets {
@@ -50,7 +80,10 @@ class UserScriptHost(
     private val activity: Activity,
     private val view: AppWebView,
     private val profile: Profile,
-    private val bundle: ScriptBundle
+    private val bundle: ScriptBundle,
+    private val script: SharedScript,
+    reference: ProfileScript,
+    private val onExecutionFailure: (String) -> Unit = {},
 ) {
     data class Menu(val doc: String, val id: String, val title: String)
     private class Session(val url: String, val reply: JavaScriptReplyProxy, val transport: ScriptMessageTransport) {
@@ -59,7 +92,11 @@ class UserScriptHost(
         var uploadId: String? = null
     }
     private val token = UUID.randomUUID().toString()
-    private val store = ScriptValueStore(activity, profile.id + ":" + bundle.metadata.first("namespace") + ":" + bundle.metadata.name)
+    private val bridgeName = "LightboatGM_" + token.replace("-", "")
+    val consoleSource = "lightboat-userscript-" + UUID.nameUUIDFromBytes(script.id.toByteArray()).toString() + ".js"
+    private val metadataIdentity = bundle.metadata.first("namespace") + ":" + bundle.metadata.name
+    private val store = ScriptValueStore(activity, profile.id + ":" + script.id + ":" + metadataIdentity,
+        if (reference.legacyStorage) profile.id + ":" + metadataIdentity else null)
     private val network = ScriptNetwork(bundle.metadata, profile.userAgent)
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = linkedMapOf<String, Session>()
@@ -75,8 +112,8 @@ class UserScriptHost(
 
     fun log(level: String, text: String) {
         if (logs.size >= 100) logs.removeFirst()
-        logs.addLast("[$level] ${text.take(8000)}")
-        DebugLog.event("userscript", "$level ${text.take(1000)}")
+        logs.addLast("[${script.name}][$level] ${text.take(8000)}")
+        DebugLog.event("userscript", "$level [${script.name}] ${text.take(1000)}")
     }
 
     fun console(message: ConsoleMessage) {
@@ -94,7 +131,7 @@ class UserScriptHost(
         }
     }
 
-    fun install(): ScriptHandler {
+    fun install(): List<ScriptHandler> {
         val meta = bundle.metadata
         log("info", "${meta.name}：${meta.runAt}；授权 ${meta.grants.joinToString().ifEmpty { "无" }}")
         if (!meta.isUserscript) log("info", "普通 JS 使用 document-start")
@@ -102,7 +139,7 @@ class UserScriptHost(
         if (Regex("""\b(?:eval|Function)\s*\(""").containsMatchIn(bundle.source) || "WebAssembly.compile" in bundle.source) {
             log("warning", "脚本包含动态代码执行；已正常注入，但网页 CSP 可能阻止解密后的代码运行")
         }
-        WebViewCompat.addWebMessageListener(view, "LightboatGM", setOf("*")) { sender, message, origin, main, reply ->
+        WebViewCompat.addWebMessageListener(view, bridgeName, setOf("*")) { sender, message, origin, main, reply ->
             if (!alive || sender !== view || message.type != WebMessageCompat.TYPE_STRING) return@addWebMessageListener
             val raw = message.data ?: return@addWebMessageListener
             if (raw.length > 2 * 1024 * 1024) return@addWebMessageListener
@@ -117,13 +154,19 @@ class UserScriptHost(
             val op = payload.optString("op")
             val id = payload.optString("id")
             if (id.length > 100) return@addWebMessageListener
+            if (op == "bootstrapFailed") {
+                val text = payload.optString("text").take(1000)
+                log("error", text)
+                onExecutionFailure(text)
+                return@addWebMessageListener
+            }
             fun respond(result: Any? = null, error: String? = null) {
                 val response = JSONObject().put("doc", doc).put("id", id)
                 if (error != null) response.put("error", error) else response.put("result", result ?: JSONObject.NULL)
                 runCatching { reply.postMessage(response.toString()) }
             }
             fun storageTask(session: Session, task: () -> Any?, success: (Any?) -> Unit = { respond(it) }) {
-                ScriptStorage.worker.execute {
+                val accepted = ScriptStorage.submit {
                     val result = runCatching(task)
                     handler.post {
                         if (!alive || sessions[doc] !== session) return@post
@@ -132,6 +175,10 @@ class UserScriptHost(
                             respond(error = error.message ?: "GM 存储失败")
                         })
                     }
+                }
+                if (!accepted) {
+                    log("error", "GM 存储繁忙，请稍后重试")
+                    respond(error = "GM 存储繁忙，请稍后重试")
                 }
             }
             try {
@@ -154,12 +201,16 @@ class UserScriptHost(
                 }
                 val session = sessions[doc] ?: error("脚本文档已失效")
                 require(sameOrigin(URI(session.url), origin)) { "脚本来源不一致" }
+                if (op == "executionFailed") {
+                    onExecutionFailure(payload.optString("text").take(1000))
+                    return@addWebMessageListener
+                }
                 if (op == "chunkAck") { session.transport.acknowledge(payload.getString("transfer"), payload.getInt("index")); return@addWebMessageListener }
                 if (op == "log") { log(payload.optString("level", "info"), payload.optString("text")); return@addWebMessageListener }
                 if (op == "dispose") { dispose(doc); return@addWebMessageListener }
                 if (op == "abort") { network.abort("$doc:${payload.getString("requestId")}"); return@addWebMessageListener }
                 if (op == "valueAbort") {
-                    ScriptStorage.worker.execute { session.upload?.close(); session.upload = null; session.uploadId = null }
+                    ScriptStorage.cleanup { session.upload?.close(); session.upload = null; session.uploadId = null }
                     return@addWebMessageListener
                 }
                 val permission = when (op) {
@@ -173,13 +224,11 @@ class UserScriptHost(
                     else -> error("不支持 GM 操作 $op")
                 }
                 require(permission.any { meta.permits(it) }) { "@grant 未授权 $op" }
-                fun broadcast(key: String, value: String?) {
-                    // Snapshot recipients on the UI thread; send in storage-worker order.
-                    val recipients = sessions.filterKeys { it != doc }.values.toList()
-                    ScriptStorage.worker.execute {
-                        recipients.forEach { recipient ->
-                            if (!recipient.closed) runCatching { recipient.transport.sendValue("value", key, value, value == null) }
-                        }
+                fun broadcast(recipients: List<Session>, key: String, value: String?) {
+                    // Run within the write task, before its acknowledgement and the next
+                    // write. No second queue submission can reject or reorder notifications.
+                    recipients.forEach { recipient ->
+                        if (!recipient.closed) runCatching { recipient.transport.sendValue("value", key, value, value == null) }
                     }
                 }
                 when (op) {
@@ -195,40 +244,41 @@ class UserScriptHost(
                         }) { result ->
                             respond(result)
                             handler.postDelayed({
-                                ScriptStorage.worker.execute {
+                                ScriptStorage.cleanup {
                                     if (session.uploadId == result) { session.upload?.close(); session.upload = null; session.uploadId = null }
                                 }
                             }, 120000)
                         }
                     }
-                    "valueChunk" -> storageTask(session, {
-                        check(!session.closed)
-                        require(payload.getString("transfer") == session.uploadId) { "GM 存储传输已失效" }
-                        val upload = session.upload ?: error("GM 存储传输不存在")
-                        try {
-                            val value = upload.append(payload.getInt("index"), payload.getString("text"), payload.getBoolean("last"))
-                            if (value != null) {
-                                store.updateEncoded(upload.key, value)
-                                upload.close(); session.upload = null; session.uploadId = null
-                                upload.key to value
-                            } else null
-                        } catch (error: Exception) { upload.close(); session.upload = null; session.uploadId = null; throw error }
-                    }) { result ->
-                        @Suppress("UNCHECKED_CAST")
-                        val value = result as? Pair<String, String>
-                        if (value != null) {
-                            broadcast(value.first, value.second)
-                        }
-                        respond()
+                    "valueChunk" -> {
+                        val recipients = sessions.filterKeys { it != doc }.values.toList()
+                        storageTask(session, {
+                            check(!session.closed)
+                            require(payload.getString("transfer") == session.uploadId) { "GM 存储传输已失效" }
+                            val upload = session.upload ?: error("GM 存储传输不存在")
+                            try {
+                                val value = upload.append(payload.getInt("index"), payload.getString("text"), payload.getBoolean("last"))
+                                if (value != null) {
+                                    store.updateEncoded(upload.key, value)
+                                    upload.close(); session.upload = null; session.uploadId = null
+                                    broadcast(recipients, upload.key, value)
+                                }
+                                null
+                            } catch (error: Exception) { upload.close(); session.upload = null; session.uploadId = null; throw error }
+                        })
                     }
                     "setValue", "deleteValue" -> {
                         val key = payload.getString("key")
                         val value = if (op == "deleteValue") null else payload.getJSONObject("value")
                         if (value != null) require(value.optString("type") in setOf("json", "undefined")) { "存储值格式无效" }
-                        storageTask(session, { check(!session.closed); store.update(key, value) }) {
-                            broadcast(key, value?.toString())
-                            respond()
-                        }
+                        val encoded = value?.toString()
+                        val recipients = sessions.filterKeys { it != doc }.values.toList()
+                        storageTask(session, {
+                            check(!session.closed)
+                            store.updateEncoded(key, encoded)
+                            broadcast(recipients, key, encoded)
+                            null
+                        })
                     }
                     "menuRegister" -> {
                         require(commands.size < 100) { "脚本菜单数量超过上限" }
@@ -267,9 +317,20 @@ class UserScriptHost(
                 }
             } catch (error: Exception) { log("error", error.message.orEmpty()); respond(error = error.message ?: "GM 调用失败") }
         }
-        if (!meta.isUserscript) return WebViewCompat.addDocumentStartJavaScript(view, bundle.source + "\n//# sourceURL=lightboat-userscript.js", setOf("*"))
         val (matcher, runtime) = UserScriptAssets.load(activity)
-        return WebViewCompat.addDocumentStartJavaScript(view, bundle.bootstrap("$matcher\n$runtime", token, profile.scriptUrl), setOf("*"))
+        val source = if (meta.isUserscript) bundle.bootstrap("$matcher\n$runtime", token, script.url, bridgeName, consoleSource)
+            else bundle.source + "\n;\nwindow[${JSONObject.quote(bridgeName + "_initialized")}]=true;\n//# sourceURL=$consoleSource"
+        val installed = mutableListOf<ScriptHandler>()
+        try {
+            // Chromium can attribute parse errors to the page instead of sourceURL.
+            // A separate source observes initialization without eval or changing raw JS scope.
+            installed += WebViewCompat.addDocumentStartJavaScript(view, bundle.initializationCheck(matcher, token, bridgeName), setOf("*"))
+            installed += WebViewCompat.addDocumentStartJavaScript(view, source, setOf("*"))
+            return installed
+        } catch (error: Exception) {
+            installed.forEach { runCatching { it.remove() } }
+            throw error
+        }
     }
 
     fun invoke(menu: Menu) {
@@ -283,7 +344,7 @@ class UserScriptHost(
         sessions.remove(doc)?.let { session ->
             session.closed = true
             session.transport.close()
-            ScriptStorage.worker.execute { session.upload?.close(); session.upload = null }
+            ScriptStorage.cleanup { session.upload?.close(); session.upload = null; session.uploadId = null }
         }
         val removed = commands.keys.removeAll { it.startsWith("$doc:") }
         if (removed) commandsChanged()
@@ -292,7 +353,13 @@ class UserScriptHost(
 
     fun resetDocuments() { sessions.keys.toList().forEach { dispose(it) } }
 
-    fun close() { alive = false; network.close(); sessions.keys.toList().forEach(::dispose); commands.clear(); commandsChanged(); commandListeners.clear(); handler.removeCallbacksAndMessages(null) }
+    fun close() {
+        alive = false
+        network.close()
+        sessions.keys.toList().forEach(::dispose)
+        commands.clear(); commandsChanged(); commandListeners.clear(); handler.removeCallbacksAndMessages(null)
+        runCatching { WebViewCompat.removeWebMessageListener(view, bridgeName) }
+    }
 
     private fun sameOrigin(uri: URI, origin: Uri): Boolean {
         val uriPort = if (uri.port >= 0) uri.port else if (uri.scheme == "https") 443 else 80

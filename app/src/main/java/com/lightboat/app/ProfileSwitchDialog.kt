@@ -26,13 +26,13 @@ internal class ProfileSwitchDialog(
     private val config: AppConfig,
     private val currentId: String?,
     private val open: (Profile) -> Unit,
-    initialCategoryId: String?,
-    private val categoryChanged: (String?) -> Unit,
+    initialFilter: ProfileFilter,
+    private val filterChanged: (ProfileFilter) -> Unit,
 ) : AppCompatDialog(activity, R.style.Theme_Lightboat_ActionDialog), ResponsiveDialog {
     private val binding = DialogSwitchProfileBinding.inflate(activity.layoutInflater)
     private val entries = SwitchAdapter { profile -> dismiss(); open(profile) }
     private val profiles get() = config.profiles
-    private var filter = ProfileFilter(initialCategoryId).resolve(config)
+    private var filter = initialFilter.resolve(config)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,7 +68,7 @@ internal class ProfileSwitchDialog(
 
     private fun changeFilter(next: ProfileFilter) {
         filter = next.resolve(config)
-        categoryChanged(filter.categoryId)
+        filterChanged(filter)
         refreshProfiles()
         binding.switchList.scrollToPosition(0)
     }

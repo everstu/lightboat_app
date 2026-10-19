@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="20dp" android:background="@drawable/bg_config_dialog">
+    <ScrollView android:id="@+id/libraryEditorScroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView android:id="@+id/libraryEditorTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp" android:textSize="20sp" android:textStyle="bold" android:textColor="@color/ink" />
+            <TextView style="@style/FieldLabel" android:text="@string/script_name_optional" android:labelFor="@id/libraryNameInput" />
+            <EditText android:id="@+id/libraryNameInput" style="@style/UrlField" android:inputType="textCapSentences"
+                android:maxLength="60" android:hint="@string/script_name_hint" android:imeOptions="actionNext|flagNoExtractUi" android:importantForAutofill="no" />
+            <TextView style="@style/FieldLabel" android:layout_marginTop="16dp" android:text="@string/script_address"
+                android:labelFor="@id/libraryUrlInput" />
+            <EditText android:id="@+id/libraryUrlInput" style="@style/UrlField" android:imeOptions="actionDone|flagNoExtractUi"
+                android:importantForAutofill="no" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                android:text="@string/script_address_help" android:textSize="12sp" android:textColor="@color/muted" />
+        </LinearLayout>
+    </ScrollView>
+    <LinearLayout android:id="@+id/libraryEditorActions" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:orientation="horizontal">
+        <Button android:id="@android:id/button2" style="@style/ConfigSecondary" android:layout_width="0dp"
+            android:layout_height="48dp" android:layout_weight="1" android:text="@string/import_cancel" />
+        <Button android:id="@android:id/button1" style="@style/ConfigPrimary" android:layout_width="0dp"
+            android:layout_height="48dp" android:layout_weight="1" android:layout_marginStart="12dp" android:text="@string/save_profile" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="76dp"
+    android:layout_marginBottom="8dp" android:orientation="horizontal" android:gravity="center_vertical"
+    android:background="@drawable/bg_selected_script" android:paddingVertical="10dp" android:paddingEnd="4dp">
+    <androidx.appcompat.widget.AppCompatCheckBox android:id="@+id/enableSelectedScript"
+        android:layout_width="48dp" android:layout_height="48dp" android:minWidth="0dp"
+        android:gravity="center" android:paddingStart="8dp" android:paddingEnd="8dp"
+        android:buttonTint="@color/accent" android:saveEnabled="false"
+        android:background="?attr/selectableItemBackgroundBorderless" />
+    <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+        android:orientation="vertical" android:layout_marginEnd="4dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+            <TextView android:id="@+id/selectedScriptOrder" android:layout_width="20dp" android:layout_height="20dp"
+                android:background="@drawable/bg_script_order" android:gravity="center" android:textColor="@color/white"
+                android:textSize="11sp" android:textStyle="bold" android:importantForAccessibility="no" />
+            <TextView android:id="@+id/selectedScriptName" android:layout_width="0dp" android:layout_weight="1"
+                android:layout_height="wrap_content" android:layout_marginStart="6dp" android:textSize="15sp"
+                android:fontFamily="sans-serif-medium" android:textColor="@color/ink" android:maxLines="2" android:ellipsize="end" />
+        </LinearLayout>
+        <TextView android:id="@+id/selectedScriptUrl" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="5dp" android:textColor="@color/muted" android:textSize="11sp"
+            android:maxLines="1" android:ellipsize="middle" />
+    </LinearLayout>
+    <ImageButton android:id="@+id/selectedScriptUp" style="@style/ScriptOrderAction"
+        android:src="@drawable/ic_script_up" android:contentDescription="@string/script_up" />
+    <ImageButton android:id="@+id/selectedScriptDown" style="@style/ScriptOrderAction"
+        android:src="@drawable/ic_script_down" android:contentDescription="@string/script_down" />
+    <ImageButton android:id="@+id/removeSelectedScript" style="@style/ScriptOrderAction.Remove"
+        android:src="@drawable/ic_script_remove" android:contentDescription="@string/script_remove_selection" />
+</LinearLayout>

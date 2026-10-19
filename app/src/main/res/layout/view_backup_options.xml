@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+    android:padding="12dp" android:background="@drawable/bg_config_soft">
+    <CheckBox android:id="@+id/backupCore" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="44dp" android:checked="true" android:enabled="false" android:buttonTint="@color/accent"
+        android:text="@string/backup_required" android:textColor="@color/ink" android:textStyle="bold" android:textSize="14sp" />
+    <CheckBox android:id="@+id/backupScriptData" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="44dp" android:checked="true" android:buttonTint="@color/accent" android:text="@string/backup_script_data"
+        android:textColor="@color/ink" android:textSize="14sp" />
+    <CheckBox android:id="@+id/backupPreferences" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="44dp" android:checked="true" android:buttonTint="@color/accent" android:text="@string/backup_preferences"
+        android:textColor="@color/ink" android:textSize="14sp" />
+    <TextView android:id="@+id/backupOptionsNote" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="6dp" android:paddingHorizontal="6dp" android:text="@string/backup_options_note"
+        android:textColor="@color/muted" android:textSize="12sp" android:lineSpacingExtra="3dp" />
+</LinearLayout>

@@ -10,7 +10,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.lightboat.app.userscript.ScriptValueStore
-import com.lightboat.app.userscript.UserScriptHost
+import com.lightboat.app.userscript.UserScriptGroup
 import fi.iki.elonen.NanoHTTPD
 import org.json.JSONObject
 import org.junit.After
@@ -65,8 +65,9 @@ class UserScriptNavigationTest {
         backup = configFile.takeIf(File::exists)?.readBytes()
         server.start()
         ScriptValueStore(context, storeIdentity).update("cache", JSONObject().put("type", "json").put("value", "x".repeat(cacheSize)))
-        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(AppConfig.EMPTY.upsert(
-            Profile(profileId, "Navigation test", "$base/first", "$base/script.user.js")))
+        val legacy = """{"version":1,"lastProfileId":"$profileId","profiles":[
+            {"id":"$profileId","name":"Navigation test","url":"$base/first","scriptUrl":"$base/script.user.js"}]}"""
+        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(ConfigCodec.decode(legacy))
         scenario = ActivityScenario.launch(MainActivity::class.java)
         waitFor("Initial userscript did not execute") { javascript("window.scriptReady===true") == "true" }
     }
@@ -74,9 +75,12 @@ class UserScriptNavigationTest {
     @After fun tearDown() {
         scenario?.close(); server.stop()
         backup?.let(configFile::writeBytes) ?: configFile.delete()
-        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(storeIdentity.toByteArray())
-            .joinToString("") { "%02x".format(it.toInt() and 255) }
-        File(context.filesDir, "userscript-values/$hash.json").delete()
+        val migratedId = UUID.nameUUIDFromBytes("$base/script.user.js".toByteArray()).toString()
+        for (identity in listOf(storeIdentity, "$profileId:$migratedId:lightboat-test:Navigation GM regression")) {
+            val hash = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
+                .joinToString("") { "%02x".format(it.toInt() and 255) }
+            File(context.filesDir, "userscript-values/$hash.json").delete()
+        }
     }
 
     @Test fun latePageStartedDoesNotEraseNewDocumentCommandsOrGmSession() {
@@ -131,11 +135,11 @@ class UserScriptNavigationTest {
         val container = activity.findViewById<FrameLayout>(R.id.webContainer)
         return (0 until container.childCount).map { container.getChildAt(it) }.filterIsInstance<AppWebView>().first()
     }
-    private fun host(activity: MainActivity): UserScriptHost = MainActivity::class.java.getDeclaredField("userScriptHost")
-        .apply { isAccessible = true }.get(activity) as UserScriptHost
+    private fun host(activity: MainActivity): UserScriptGroup = MainActivity::class.java.getDeclaredField("userScriptHost")
+        .apply { isAccessible = true }.get(activity) as UserScriptGroup
     private fun menuTitles(): List<String> {
         var result = emptyList<String>()
-        scenario!!.onActivity { result = host(it).menus.map(UserScriptHost.Menu::title) }
+        scenario!!.onActivity { result = host(it).menus.map { menu -> menu.command.title } }
         return result
     }
     private fun invokeCommand() { scenario!!.onActivity { activity -> host(activity).let { it.invoke(it.menus.single()) } } }

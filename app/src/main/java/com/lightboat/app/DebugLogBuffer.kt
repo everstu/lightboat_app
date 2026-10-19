@@ -14,6 +14,10 @@ internal class DebugLogBuffer(private val limit: Int = 2000) {
     fun clear() { rows.clear(); sequence++ }
     fun read(after: Long?): Read {
         val reset = after == null || after > sequence || rows.firstOrNull()?.let { after < it.first - 1 } == true
-        return Read(sequence, reset, rows.filter { reset || it.first > after!! }.map { it.second })
+        val count = if (reset) rows.size else (sequence - after!!).coerceAtMost(rows.size.toLong()).toInt()
+        if (count == 0) return Read(sequence, reset, emptyList())
+        val lines = ArrayList<String>(count)
+        for (index in rows.size - count until rows.size) lines.add(rows[index].second)
+        return Read(sequence, reset, lines)
     }
 }

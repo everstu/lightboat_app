@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:background="@color/paper">
 
@@ -85,6 +85,26 @@
                         </LinearLayout>
                         <EditText android:id="@+id/websiteInput" style="@style/UrlField" android:layout_marginTop="0dp"
                             android:hint="@string/website_hint" android:imeOptions="actionNext" />
+                    </LinearLayout>
+                    <TextView style="@style/FieldLabel" android:layout_marginTop="24dp" android:layout_marginBottom="12dp"
+                        android:text="@string/script_injection_title" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+                        android:background="@drawable/bg_profile" android:padding="12dp">
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:paddingHorizontal="4dp" android:gravity="center_vertical">
+                            <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
+                                android:text="@string/script_selected_title" />
+                            <TextView android:id="@+id/selectedScriptsSummary" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp" android:textColor="@color/accent" android:textSize="12sp" />
+                        </LinearLayout>
+                        <TextView android:id="@+id/selectedScriptsHelp" android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp" android:paddingHorizontal="4dp" android:text="@string/script_selected_help"
+                            android:textColor="@color/muted" android:textSize="12sp" android:lineSpacingExtra="2dp" />
+                        <LinearLayout android:id="@+id/selectedScripts" android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:orientation="vertical" android:layout_marginTop="12dp" />
+                        <Button android:id="@+id/chooseScripts" style="@style/ConfigSecondary" android:layout_width="match_parent"
+                            android:layout_height="48dp" android:layout_marginTop="4dp" android:drawableStart="@drawable/ic_scripts"
+                            android:drawablePadding="8dp" android:text="@string/script_select" />
                         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:layout_marginTop="16dp" android:gravity="center_vertical">
                             <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
@@ -95,6 +115,8 @@
                         </LinearLayout>
                         <EditText android:id="@+id/scriptInput" style="@style/UrlField" android:layout_marginTop="0dp"
                             android:hint="@string/script_hint" android:imeOptions="actionDone" />
+                        <Button android:id="@+id/addScript" style="@style/ConfigAction" android:layout_width="match_parent"
+                            android:layout_height="48dp" android:text="@string/script_add_address" />
                         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:layout_marginTop="10dp" android:text="@string/script_help"
                             android:textColor="@color/muted" android:textSize="12sp" android:lineSpacingExtra="3dp" />
@@ -145,13 +167,17 @@
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:paddingStart="24dp" android:paddingEnd="12dp" android:gravity="center_vertical">
                     <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                        android:text="@string/profiles_title" android:textColor="@color/ink" android:textSize="28sp" android:textStyle="bold" />
+                        android:text="@string/profiles_title" android:textColor="@color/ink" android:textSize="28sp" android:textStyle="bold"
+                        android:maxLines="1" android:ellipsize="end" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="20sp" android:autoSizeMaxTextSize="28sp" />
+                    <ImageButton android:id="@+id/webDavButton" android:layout_width="48dp" android:layout_height="48dp"
+                        android:src="@drawable/ic_cloud_backup" android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/webdav_entry" />
                     <Button android:id="@+id/renameCategories" style="@style/ConfigAction" android:layout_width="wrap_content"
-                        android:layout_height="48dp" android:paddingHorizontal="12dp" android:textSize="13sp"
+                        android:layout_height="48dp" android:minWidth="0dp" android:paddingHorizontal="8dp" android:textSize="13sp"
                         android:text="@string/category_rename_action" android:visibility="gone" />
                     <ImageButton android:id="@+id/returnButton" android:layout_width="48dp" android:layout_height="48dp"
-                        android:src="@drawable/ic_back" android:contentDescription="@string/cancel"
-                        android:background="?attr/selectableItemBackgroundBorderless" android:visibility="gone" />
+                        android:src="@drawable/ic_back" android:contentDescription="@string/profiles_back"
+                        android:background="?attr/selectableItemBackgroundBorderless" />
                 </LinearLayout>
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:paddingHorizontal="24dp" android:layout_marginTop="4dp" android:text="@string/profiles_note"
@@ -180,7 +206,7 @@
                 <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
                     <androidx.recyclerview.widget.RecyclerView android:id="@+id/profilesList" android:layout_width="match_parent"
                         android:layout_height="match_parent" android:paddingHorizontal="20dp"
-                        android:paddingBottom="100dp" android:clipToPadding="false" android:scrollbars="vertical" />
+                        android:paddingBottom="124dp" android:clipToPadding="false" android:scrollbars="vertical" />
                     <ScrollView android:id="@+id/emptyProfiles" android:layout_width="match_parent" android:layout_height="match_parent" android:fillViewport="true">
                         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:orientation="vertical" android:gravity="center" android:paddingHorizontal="32dp" android:paddingVertical="28dp">
@@ -209,10 +235,18 @@
                 <TextView android:id="@+id/versionLabel" android:layout_width="match_parent" android:layout_height="44dp"
                     android:paddingHorizontal="24dp" android:gravity="center_vertical" android:textColor="@color/muted" android:textSize="11sp" />
             </LinearLayout>
-            <Button android:id="@+id/addButton" style="@style/ConfigPrimary" android:layout_width="wrap_content" android:layout_height="56dp"
-                android:layout_gravity="bottom|end" android:layout_marginEnd="24dp" android:layout_marginBottom="24dp"
-                android:drawableStart="@drawable/ic_add" android:drawablePadding="8dp" android:text="@string/add_profile"
-                android:paddingHorizontal="20dp" android:elevation="6dp" />
+            <LinearLayout android:id="@+id/profileFloatingActions" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_gravity="bottom|end" android:layout_marginEnd="10dp" android:layout_marginBottom="12dp"
+                android:orientation="vertical" android:gravity="end" android:alpha="0.85">
+                <com.lightboat.app.ProfileFloatingActionButton android:id="@+id/scriptLibrary" style="@style/ProfileFloatingAction"
+                    app:actionIcon="@drawable/ic_scripts" app:actionLabel="@string/script_library"
+                    app:actionCaption="@string/floating_action_scripts"
+                    app:actionBackground="@drawable/bg_floating_library" />
+                <com.lightboat.app.ProfileFloatingActionButton android:id="@+id/addButton" style="@style/ProfileFloatingAction"
+                    app:actionIcon="@drawable/ic_add_compact" app:actionLabel="@string/add_profile"
+                    app:actionCaption="@string/floating_action_profiles"
+                    app:actionBackground="@drawable/bg_floating_primary" />
+            </LinearLayout>
         </FrameLayout>
 
         <LinearLayout android:id="@+id/statusPanel" android:layout_width="match_parent"

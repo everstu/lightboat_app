@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
@@ -54,6 +55,7 @@ import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.lightboat.app.databinding.DialogBrowserMenuBinding
+import com.lightboat.app.databinding.ItemProfileScriptBinding
 import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -61,9 +63,11 @@ import java.net.URI
 import java.util.UUID
 import java.util.concurrent.Executors
 import org.json.JSONObject
-import com.lightboat.app.userscript.ScriptBundle
 import com.lightboat.app.userscript.ScriptPreparer
-import com.lightboat.app.userscript.UserScriptHost
+import com.lightboat.app.userscript.UserScriptGroup
+import com.lightboat.app.userscript.PreparedScript
+import com.lightboat.app.userscript.ScriptInstallationException
+import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -84,7 +88,7 @@ class MainActivity : AppCompatActivity() {
     private var pageFailed = false
     private var pageReady = false
     private var screen = Screen.PROFILES
-    private var exportSnapshot: String? = null
+    private var exportOptions: com.lightboat.app.backup.BackupOptions? = null
     private var scanTarget: ScanTarget? = null
     private var nativeDialog: Dialog? = null
     private lateinit var defaultUserAgent: String
@@ -92,7 +96,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var windowsUserAgent: String
     private var editingPlatform = BrowserPlatform.ANDROID
     private lateinit var fullscreenPlayer: FullscreenPlayer
-    private var userScriptHost: UserScriptHost? = null
+    private var userScriptHost: UserScriptGroup? = null
+    private var draftScripts = emptyList<ProfileScript>()
+    private var draftScriptLibrary = emptyList<SharedScript>()
     private lateinit var profileAdapter: ProfileAdapter
     private lateinit var categoryNameInputFilter: CategoryNameInputFilter
     private lateinit var profileDrag: ItemTouchHelper
@@ -101,6 +107,7 @@ class MainActivity : AppCompatActivity() {
     private var profileOrderFilter = ProfileFilter()
     private val profileUiPreferences by lazy(LazyThreadSafetyMode.NONE) { getSharedPreferences("profile_ui", MODE_PRIVATE) }
     private var settingsInfoInitialized = false
+    private var backupRecoveryBlocked = false
     private val nativeGuardScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("native-guard.js") }
     private val clipboardSupportScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("clipboard-support.js") }
     private val mediaDiagnosticsScript by lazy(LazyThreadSafetyMode.NONE) { readAssetText("media-diagnostics.js") }
@@ -127,15 +134,12 @@ class MainActivity : AppCompatActivity() {
             showConfigImport(uri)
         }
     }
-    private val exportFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        val text = exportSnapshot
-        exportSnapshot = null
-        if (uri != null && text != null) worker.execute {
-            try {
-                (contentResolver.openOutputStream(uri, "wt") ?: error("无法写入所选文件"))
-                    .bufferedWriter(Charsets.UTF_8).use { it.write(text) }
-                runOnUiThread { if (!isDestroyed) toast(getString(R.string.export_done)) }
-            } catch (error: Exception) { reportOperationError(error) }
+    private val exportFile = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        val options = exportOptions ?: com.lightboat.app.backup.BackupOptionsStore(this).load()
+        exportOptions = null
+        if (uri != null) {
+            showNativeDialog(BackupExportDialog(this, defaultUserAgent, options, destination = uri,
+                prepareData = ::prepareBackupData, chooseFile = {}))
         }
     }
 
@@ -183,6 +187,10 @@ class MainActivity : AppCompatActivity() {
         binding.edgeMenuButton.setOnClickListener { showBrowserMenu() }
         binding.scanWebsiteButton.setOnClickListener { startScan(ScanTarget.WEBSITE) }
         binding.scanScriptButton.setOnClickListener { startScan(ScanTarget.SCRIPT) }
+        binding.chooseScripts.setOnClickListener { chooseScripts() }
+        binding.addScript.setOnClickListener { addDraftScript() }
+        binding.scriptLibrary.setOnClickListener { showScriptLibrary() }
+        binding.webDavButton.setOnClickListener { showWebDav() }
         binding.applePlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.APPLE, true) }
         binding.androidPlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.ANDROID, true) }
         binding.windowsPlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.WINDOWS, true) }
@@ -223,34 +231,69 @@ class MainActivity : AppCompatActivity() {
         binding.saveButton.setOnClickListener { saveEditor(false) }
         binding.saveOpenButton.setOnClickListener { saveEditor(true) }
         binding.cancelButton.setOnClickListener { showProfiles() }
-        binding.returnButton.setOnClickListener { returnToPage() }
+        binding.returnButton.setOnClickListener { leaveProfileManager() }
         binding.importButton.setOnClickListener { showConfigImport() }
         binding.exportButton.setOnClickListener {
             commitProfileOrder()
-            exportSnapshot = ConfigCodec.encode(config)
-            exportFile.launch("lightboat-config.json")
+            hideKeyboard()
+            showNativeDialog(BackupExportDialog(this, defaultUserAgent, com.lightboat.app.backup.BackupOptionsStore(this).load(),
+                prepareData = ::prepareBackupData, chooseFile = { options ->
+                    exportOptions = options
+                    exportFile.launch("lightboat-backup.zip")
+                }))
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (backupRecoveryBlocked) { finish(); return }
                 if (fullscreenPlayer.isActive) { fullscreenPlayer.hide(); return }
                 when (screen) {
                     Screen.EDITOR -> showProfiles()
-                    Screen.PROFILES -> if (pageReady && webView != null) returnToPage() else confirmExit()
+                    Screen.PROFILES -> leaveProfileManager()
                     Screen.LOADING, Screen.ERROR -> showProfiles()
                     Screen.BROWSER -> if (webView?.canGoBack() == true) webView?.goBack() else confirmExit()
                 }
             }
         })
+        if (com.lightboat.app.backup.BackupRepository.isRestoring) {
+            backupRecoveryBlocked = true
+            binding.settingsButton.isEnabled = false
+            showLoading(R.string.webdav_restoring)
+            worker.execute {
+                val result = runCatching { com.lightboat.app.backup.BackupRepository.awaitRestore() }
+                runOnUiThread {
+                    if (!isDestroyed && !isFinishing) {
+                        if (result.isSuccess) {
+                            backupRecoveryBlocked = false
+                            binding.settingsButton.isEnabled = true
+                            finishStartup(savedInstanceState)
+                        } else blockForBackupRecovery()
+                    }
+                }
+            }
+        } else finishStartup(savedInstanceState)
+    }
+
+    private fun finishStartup(savedInstanceState: Bundle?) {
+        try {
+            com.lightboat.app.backup.BackupRepository.recoverPending(this)?.let { retired -> worker.execute { retired.deleteRecursively() } }
+            val abandonedBackups = com.lightboat.app.backup.BackupRepository.abandonedFiles(this)
+            worker.execute { abandonedBackups.forEach { it.deleteRecursively() } }
+        } catch (error: Exception) {
+            DebugLog.event("webdav", "startup recovery failed type=${error.javaClass.simpleName}")
+            blockForBackupRecovery()
+            return
+        }
         config = try { store.load() } catch (error: Exception) {
             toast(getString(R.string.config_read_error))
             AppConfig.EMPTY
         }
         val categoryId = if (savedInstanceState?.containsKey("profileCategoryFilter") == true)
             savedInstanceState.getString("profileCategoryFilter") else profileUiPreferences.getString("categoryId", null)
-        profileFilter = ProfileFilter(categoryId,
-            savedInstanceState?.getBoolean("profileFavoriteFilter") ?: false).resolve(config)
-        rememberProfileCategory(profileFilter.categoryId)
-        exportSnapshot = savedInstanceState?.getString("exportSnapshot")
+        val favoritesOnly = if (savedInstanceState?.containsKey("profileFavoriteFilter") == true)
+            savedInstanceState.getBoolean("profileFavoriteFilter") else profileUiPreferences.getBoolean("favoritesOnly", false)
+        rememberProfileFilter(ProfileFilter(categoryId, favoritesOnly))
+        if (savedInstanceState?.getBoolean("pendingBackupExport") == true) exportOptions = com.lightboat.app.backup.BackupOptions(
+            savedInstanceState.getBoolean("exportScriptData", true), savedInstanceState.getBoolean("exportPreferences", true))
         scanTarget = savedInstanceState?.getString("scanTarget")?.let { value ->
             ScanTarget.entries.firstOrNull { it.name == value }
         }
@@ -263,6 +306,13 @@ class MainActivity : AppCompatActivity() {
             binding.favoriteInput.isChecked = savedInstanceState.getBoolean("draftFavorite", binding.favoriteInput.isChecked)
             binding.websiteInput.setText(savedInstanceState.getString("draftUrl"))
             binding.scriptInput.setText(savedInstanceState.getString("draftScript"))
+            savedInstanceState.getString("draftScriptLibrary")?.let { text ->
+                runCatching { ConfigCodec.decode(text) }.getOrNull()?.let { draftScriptLibrary = it.scriptLibrary }
+            }
+            savedInstanceState.getString("draftScripts")?.let { text ->
+                draftScripts = runCatching { ConfigCodec.decodeReferences(JSONArray(text), draftScriptLibrary) }.getOrDefault(emptyList())
+            }
+            renderDraftScripts()
             binding.userAgentInput.setText(savedInstanceState.getString("draftUserAgent", defaultUserAgent))
             savedInstanceState.getString("draftPlatform")?.let {
                 selectPlatform(BrowserPlatform.parse(it), false)
@@ -421,7 +471,7 @@ class MainActivity : AppCompatActivity() {
     private fun showProfilePicker() {
         if (config.profiles.isEmpty()) { showProfiles(); return }
         showNativeDialog(ProfileSwitchDialog(this, config, currentId, ::openProfile,
-            profileFilter.categoryId, ::rememberProfileCategory))
+            profileFilter, ::rememberProfileFilter))
     }
 
     private fun startScan(target: ScanTarget) {
@@ -481,6 +531,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun cancelDownload() {
         generation++
+        (nativeDialog as? ScriptFailureDialog)?.dismiss()
         DebugLog.event("script", "cancel generation=$generation")
         scriptLoader.cancel()
     }
@@ -497,16 +548,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun changeProfileFilter(next: ProfileFilter) {
         commitProfileOrder()
-        profileFilter = next.resolve(config)
-        rememberProfileCategory(profileFilter.categoryId)
+        rememberProfileFilter(next)
         renderProfiles()
         binding.profilesList.scrollToPosition(0)
     }
 
-    private fun rememberProfileCategory(categoryId: String?) {
-        profileFilter = profileFilter.copy(categoryId = categoryId).resolve(config)
-        if (profileUiPreferences.getString("categoryId", null) != profileFilter.categoryId) {
-            profileUiPreferences.edit().putString("categoryId", profileFilter.categoryId).apply()
+    private fun rememberProfileFilter(next: ProfileFilter) {
+        profileFilter = next.resolve(config)
+        if (profileUiPreferences.getString("categoryId", null) != profileFilter.categoryId ||
+            profileUiPreferences.getBoolean("favoritesOnly", false) != profileFilter.favoritesOnly) {
+            profileUiPreferences.edit().putString("categoryId", profileFilter.categoryId)
+                .putBoolean("favoritesOnly", profileFilter.favoritesOnly).apply()
         }
     }
 
@@ -523,14 +575,14 @@ class MainActivity : AppCompatActivity() {
         binding.emptyFilteredProfiles.visibility = if (config.profiles.isNotEmpty() && visible.isEmpty()) View.VISIBLE else View.GONE
         binding.profileCount.text = if (profileFilter == ProfileFilter()) getString(R.string.profiles_count, config.profiles.size)
             else getString(R.string.profiles_filtered_count, visible.size, config.profiles.size)
-        binding.returnButton.visibility = if (pageReady && webView != null) View.VISIBLE else View.GONE
+        binding.returnButton.visibility = View.VISIBLE
         binding.exportButton.isEnabled = config.profiles.isNotEmpty()
         binding.exportButton.alpha = if (binding.exportButton.isEnabled) 1f else 0.4f
         binding.addButton.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
         binding.addButton.isEnabled = config.profiles.size < AppConfig.MAX_PROFILES
         binding.addButton.alpha = if (binding.addButton.isEnabled) 1f else 0.4f
-        binding.addButton.setText(if (binding.addButton.isEnabled) getString(R.string.add_profile)
-            else getString(R.string.profile_limit, AppConfig.MAX_PROFILES))
+        binding.addButton.contentDescription = if (binding.addButton.isEnabled) getString(R.string.add_profile)
+            else getString(R.string.profile_limit, AppConfig.MAX_PROFILES)
         profileOrderDirty = false
         profileOrderFilter = profileFilter
         profileAdapter.submit(config, currentId.takeIf { webView != null }, visible)
@@ -637,7 +689,10 @@ class MainActivity : AppCompatActivity() {
         binding.categoryInput.error = null
         binding.favoriteInput.isChecked = profile?.favorite ?: false
         binding.websiteInput.setText(profile?.url.orEmpty())
-        binding.scriptInput.setText(profile?.scriptUrl.orEmpty())
+        binding.scriptInput.setText("")
+        draftScripts = profile?.scripts.orEmpty().toList()
+        draftScriptLibrary = config.scriptLibrary.toList()
+        renderDraftScripts()
         binding.userAgentInput.setText(profile?.userAgent ?: defaultUserAgent)
         selectPlatform(profile?.platform ?: BrowserPlatform.ANDROID, false)
         binding.nameInput.error = null
@@ -677,9 +732,7 @@ class MainActivity : AppCompatActivity() {
         val url = try { AppConfig.normalizeUrl(binding.websiteInput.text.toString()) } catch (error: IllegalArgumentException) {
             binding.websiteInput.error = error.message; binding.websiteInput.requestFocus(); return
         }
-        val scriptUrl = try { AppConfig.normalizeOptionalUrl(binding.scriptInput.text.toString()) } catch (error: IllegalArgumentException) {
-            binding.scriptInput.error = error.message; binding.scriptInput.requestFocus(); return
-        }
+        if (binding.scriptInput.text.isNotBlank() && !addDraftScript()) return
         val userAgent = try { AppConfig.normalizeUserAgent(binding.userAgentInput.text.toString()) } catch (error: IllegalArgumentException) {
             binding.userAgentInput.error = error.message; binding.userAgentInput.requestFocus(); return
         }
@@ -691,10 +744,10 @@ class MainActivity : AppCompatActivity() {
             binding.categoryInput.requestFocus(); return
         }
         val previous = config.profiles.firstOrNull { it.id == editingId }
-        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, scriptUrl, userAgent, editingPlatform,
+        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, draftScripts, userAgent, editingPlatform,
             previous?.categoryId, binding.favoriteInput.isChecked)
         val next = try {
-            config.upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
+            withScriptLibrary(draftScriptLibrary).upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
         } catch (error: Exception) {
             toast(error.message.orEmpty()); return
         }
@@ -716,8 +769,101 @@ class MainActivity : AppCompatActivity() {
         false
     }
 
-    private fun openProfile(profile: Profile) {
-        DebugLog.event("profile", "open name=${profile.name.take(80)} url=${DebugLog.safeUrl(profile.url)} script=${DebugLog.safeUrl(profile.scriptUrl)} platform=${profile.platform}")
+    private fun withScriptLibrary(library: List<SharedScript>): AppConfig = config.copy(scriptLibrary = library,
+        profiles = config.profiles.map { profile -> profile.copy(scripts = profile.scripts.filter { ref -> library.any { it.id == ref.scriptId } }) })
+
+    private fun renderDraftScripts() {
+        binding.selectedScriptsSummary.text = if (draftScripts.isEmpty()) getString(R.string.script_none_selected)
+            else getString(R.string.script_selection_summary, draftScripts.size, draftScripts.count { it.enabled })
+        binding.selectedScriptsHelp.setText(if (draftScripts.isEmpty()) R.string.script_selected_empty_help else R.string.script_selected_help)
+        binding.selectedScripts.visibility = if (draftScripts.isEmpty()) View.GONE else View.VISIBLE
+        binding.selectedScripts.removeAllViews()
+        draftScripts.forEachIndexed { index, ref ->
+            val script = draftScriptLibrary.firstOrNull { it.id == ref.scriptId } ?: return@forEachIndexed
+            val row = ItemProfileScriptBinding.inflate(layoutInflater, binding.selectedScripts, false)
+            row.root.tag = script.id
+            row.selectedScriptOrder.text = (index + 1).toString()
+            row.selectedScriptName.text = script.name
+            row.selectedScriptUrl.text = script.url.substringBefore('?').substringBefore('#')
+            row.enableSelectedScript.isChecked = ref.enabled
+            row.enableSelectedScript.contentDescription = getString(R.string.script_enable_description, script.name)
+            fun showEnabled(enabled: Boolean) {
+                row.root.isActivated = enabled
+                row.selectedScriptOrder.alpha = if (enabled) 1f else 0.45f
+                row.selectedScriptName.setTextColor(getColor(if (enabled) R.color.ink else R.color.muted))
+                ViewCompat.setStateDescription(row.enableSelectedScript, getString(if (enabled) R.string.script_enabled else R.string.script_disabled))
+            }
+            showEnabled(ref.enabled)
+            row.enableSelectedScript.setOnCheckedChangeListener { _, enabled ->
+                val current = draftScripts.indexOfFirst { it.scriptId == script.id }
+                if (current >= 0) draftScripts = draftScripts.toMutableList().apply { this[current] = this[current].copy(enabled = enabled) }
+                showEnabled(enabled)
+                binding.selectedScriptsSummary.text = getString(R.string.script_selection_summary, draftScripts.size, draftScripts.count { it.enabled })
+            }
+            row.selectedScriptUp.isEnabled = index > 0
+            row.selectedScriptDown.isEnabled = index < draftScripts.lastIndex
+            row.selectedScriptUp.alpha = if (row.selectedScriptUp.isEnabled) 1f else 0.35f
+            row.selectedScriptDown.alpha = if (row.selectedScriptDown.isEnabled) 1f else 0.35f
+            row.selectedScriptUp.contentDescription = getString(R.string.script_move_up_description, script.name)
+            row.selectedScriptDown.contentDescription = getString(R.string.script_move_down_description, script.name)
+            fun move(offset: Int) {
+                val current = draftScripts.indexOfFirst { it.scriptId == script.id }
+                if (current >= 0 && current + offset in draftScripts.indices) {
+                    draftScripts = draftScripts.toMutableList().apply { add(current + offset, removeAt(current)) }
+                    renderDraftScripts()
+                }
+            }
+            row.selectedScriptUp.setOnClickListener { move(-1) }
+            row.selectedScriptDown.setOnClickListener { move(1) }
+            row.selectedScriptUp.tooltipText = getString(R.string.script_up)
+            row.selectedScriptDown.tooltipText = getString(R.string.script_down)
+            row.removeSelectedScript.contentDescription = getString(R.string.script_remove_description, script.name)
+            row.removeSelectedScript.tooltipText = getString(R.string.script_remove_selection)
+            row.removeSelectedScript.setOnClickListener {
+                draftScripts = draftScripts.filterNot { it.scriptId == script.id }
+                renderDraftScripts()
+            }
+            binding.selectedScripts.addView(row.root)
+        }
+    }
+
+    private fun addDraftScript(): Boolean {
+        val url = try { AppConfig.normalizeScriptUrl(binding.scriptInput.text.toString()) } catch (error: IllegalArgumentException) {
+            binding.scriptInput.error = error.message; binding.scriptInput.requestFocus(); return false
+        }
+        val existing = draftScriptLibrary.firstOrNull { it.url == url }
+        if (draftScripts.none { it.scriptId == existing?.id } && draftScripts.size >= AppConfig.MAX_PROFILE_SCRIPTS) {
+            binding.scriptInput.error = getString(R.string.script_profile_limit, AppConfig.MAX_PROFILE_SCRIPTS); return false
+        }
+        val script = existing ?: SharedScript(UUID.randomUUID().toString(),
+            AppConfig.defaultScriptName(url), url)
+        try { draftScriptLibrary = config.copy(scriptLibrary = draftScriptLibrary).upsertScript(script).scriptLibrary }
+        catch (error: IllegalArgumentException) { binding.scriptInput.error = error.message; return false }
+        if (draftScripts.none { it.scriptId == script.id }) draftScripts += ProfileScript(script.id)
+        binding.scriptInput.setText("")
+        binding.scriptInput.error = null
+        renderDraftScripts()
+        return true
+    }
+
+    private fun chooseScripts() {
+        hideKeyboard()
+        showNativeDialog(ScriptLibraryDialog(this, config.copy(scriptLibrary = draftScriptLibrary), draftScripts) { library, references ->
+            draftScriptLibrary = library; draftScripts = references; renderDraftScripts(); true
+        })
+    }
+
+    private fun showScriptLibrary() {
+        commitProfileOrder()
+        showNativeDialog(ScriptLibraryDialog(this, config, null) { library, _ ->
+            if (persist(withScriptLibrary(library))) { renderProfiles(); true } else false
+        })
+    }
+
+    private fun openProfile(profile: Profile) = openProfile(profile, emptySet())
+
+    private fun openProfile(profile: Profile, skippedScriptIds: Set<String>) {
+        DebugLog.event("profile", "open name=${profile.name.take(80)} url=${DebugLog.safeUrl(profile.url)} scripts=${profile.scripts.count { it.enabled }} platform=${profile.platform}")
         if (config.lastProfileId != profile.id && !persist(config.select(profile.id))) return
         hideKeyboard()
         cancelDownload()
@@ -736,77 +882,92 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val request = generation
-        if (profile.scriptUrl.isBlank()) {
-            DebugLog.event("script", "skipped: no script URL")
+        val scripts = config.activeScripts(profile).filterNot { it.id in skippedScriptIds }
+        val prepared = mutableListOf<PreparedScript>()
+        val failures = mutableListOf<Pair<SharedScript, Throwable>>()
+        var totalBytes = 0
+        fun current() = !isDestroyed && request == generation && navigationRequest == navigationGeneration
+        fun fail(script: SharedScript, error: Throwable) {
+            if (!current()) return
+            failures += script to error
+            DebugLog.event("script", "prepare failed name=${script.name} error=${error.message.orEmpty().take(240)}")
+        }
+        fun openPrepared() {
+            scriptLoader.close()
             binding.root.post {
-                if (!isDestroyed && request == generation && navigationRequest == navigationGeneration) {
+                if (current()) {
                     try {
+                        showLoading(R.string.loading_page)
                         prepareMainWebView(profile)
-                        createWebView(profile, nativeGuardScript, null, navigationRequest)
+                        createWebView(profile, nativeGuardScript, prepared.toList(), navigationRequest)
+                    } catch (error: ScriptInstallationException) {
+                        if (!current()) return@post
+                        DebugLog.event("script", "install failed name=${error.script.name} error=${error.message.orEmpty().take(240)}")
+                        destroyWebView()
+                        val failedNavigation = navigationGeneration
+                        fun stillCurrent() = !isDestroyed && request == generation && failedNavigation == navigationGeneration
+                        showError(R.string.script_error_title, "${error.script.name}：${error.message.orEmpty()}")
+                        showNativeDialog(ScriptFailureDialog(this, false,
+                            proceed = { if (stillCurrent()) openProfile(profile, skippedScriptIds + failures.map { it.first.id } + error.script.id) },
+                            retry = { if (stillCurrent()) openProfile(profile, skippedScriptIds) },
+                            cancelVisit = { if (stillCurrent()) showProfiles() }
+                        ).apply { addFailure(error.script, error.message ?: getString(R.string.script_download_error)) })
                     } catch (error: Exception) {
                         DebugLog.event("webview", "create failed ${error.message.orEmpty().take(240)}")
                         destroyWebView()
-                        showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
+                        showError(R.string.page_error_title, error.message ?: getString(R.string.script_download_error))
                     }
                 }
             }
-            return
         }
-        try {
-            scriptLoader.load(profile.scriptUrl, profile.userAgent, profile.platform) { result ->
-                DebugLog.event("script", "load result=${if (result.isSuccess) "success" else "failure:${result.exceptionOrNull()?.message.orEmpty().take(180)}"} url=${DebugLog.safeUrl(profile.scriptUrl)}")
-                if (!isDestroyed && request == generation) {
-                    result.fold(onSuccess = { script ->
+        fun loadNext(index: Int) {
+            if (!current()) return
+            if (index == scripts.size) {
+                scriptLoader.close()
+                if (failures.isEmpty()) openPrepared() else {
+                    showError(R.string.script_error_title, failures.joinToString("\n") { (script, error) -> "${script.name}：${error.message.orEmpty()}" })
+                    showNativeDialog(ScriptFailureDialog(this, false,
+                        proceed = { if (current()) openPrepared() },
+                        retry = { if (current()) openProfile(profile, skippedScriptIds) },
+                        cancelVisit = { if (current()) showProfiles() }
+                    ).apply { failures.forEach { (script, error) -> addFailure(script, error.message ?: getString(R.string.script_download_error)) } })
+                }
+                return
+            }
+            val script = scripts[index]
+            binding.statusDetail.text = getString(R.string.script_preparing_item, index + 1, scripts.size, script.name)
+            try {
+                scriptLoader.load(script.url, profile.userAgent, profile.platform) { result ->
+                    if (!current()) return@load
+                    result.fold(onSuccess = { source ->
                         try {
                             ScriptPreparer(scriptLoader).prepare(
-                                script, profile.scriptUrl, profile.userAgent, profile.platform
-                            ) { prepared ->
-                                if (!isDestroyed && request == generation) {
-                                    prepared.fold(onSuccess = { bundle ->
-                                        DebugLog.event("script", "prepared name=${bundle.metadata.name.take(100)} runAt=${bundle.metadata.runAt} grants=${bundle.metadata.grants.size} sourceBytes=${bundle.source.length}")
-                                        scriptLoader.close()
-                                        // Start navigation after the completed loader callback.
-                                        binding.root.post {
-                                            if (!isDestroyed && request == generation && navigationRequest == navigationGeneration) {
-                                                try {
-                                                    prepareMainWebView(profile)
-                                                    createWebView(profile, nativeGuardScript, bundle, navigationRequest)
-                                                } catch (error: Exception) {
-                                                    DebugLog.event("webview", "create failed ${error.message.orEmpty().take(240)}")
-                                                    destroyWebView()
-                                                    showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
-                                                }
-                                            }
-                                        }
-                                    }, onFailure = { error ->
-                                        DebugLog.event("script", "prepare failed ${error.message.orEmpty().take(240)}")
-                                        scriptLoader.close()
-                                        showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
-                                    })
-                                }
+                                source, script.url, profile.userAgent, profile.platform
+                            ) { resultBundle ->
+                                if (!current()) return@prepare
+                                resultBundle.fold(onSuccess = { bundle ->
+                                    val bundleBytes = bundle.source.toByteArray(Charsets.UTF_8).size +
+                                        bundle.requirements.sumOf { it.toByteArray(Charsets.UTF_8).size } + bundle.resources.toString().toByteArray(Charsets.UTF_8).size
+                                    if (totalBytes + bundleBytes > 16 * 1024 * 1024) {
+                                        fail(script, IllegalArgumentException("当前配置的脚本及依赖合计不能超过 16 MiB"))
+                                    } else {
+                                        totalBytes += bundleBytes
+                                        prepared += PreparedScript(script, bundle)
+                                        DebugLog.event("script", "prepared ${index + 1}/${scripts.size} name=${script.name} runAt=${bundle.metadata.runAt}")
+                                    }
+                                    loadNext(index + 1)
+                                }, onFailure = { fail(script, it); loadNext(index + 1) })
                             }
-                        } catch (error: Exception) {
-                            DebugLog.event("script", "prepare exception ${error.message.orEmpty().take(240)}")
-                            scriptLoader.close()
-                            destroyWebView()
-                            showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
-                        }
-                    }, onFailure = { error ->
-                        DebugLog.event("script", "download failed ${error.message.orEmpty().take(240)}")
-                        scriptLoader.close()
-                        showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
-                    })
+                        } catch (error: Exception) { fail(script, error); loadNext(index + 1) }
+                    }, onFailure = { fail(script, it); loadNext(index + 1) })
                 }
-            }
-        } catch (error: Exception) {
-            DebugLog.event("script", "load exception ${error.message.orEmpty().take(240)}")
-            scriptLoader.close()
-            showError(R.string.script_error_title, error.message ?: getString(R.string.script_download_error))
+            } catch (error: Exception) { fail(script, error); loadNext(index + 1) }
         }
+        loadNext(0)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun createWebView(profile: Profile, guard: String, bundle: ScriptBundle?, navigationRequest: Long) {
+    private fun createWebView(profile: Profile, guard: String, bundles: List<PreparedScript>, navigationRequest: Long) {
         DebugLog.event("webview", "create navigation=$navigationRequest url=${DebugLog.safeUrl(profile.url)}")
         val view = webView ?: AppWebView(this).also {
             webView = it
@@ -975,7 +1136,18 @@ class MainActivity : AppCompatActivity() {
         MobileUserAgent.navigatorIdentityScript(profile.platform, profile.userAgent)?.let { identity ->
             scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, identity, setOf("*"))
         }
-        userScriptHost = bundle?.let { UserScriptHost(this, view, profile, it) }
+        var runtimeFailureDialog: ScriptFailureDialog? = null
+        userScriptHost = if (bundles.isEmpty()) null else UserScriptGroup(this, view, profile, bundles) { script, message ->
+            binding.root.post {
+                if (!isCurrentNavigation() || pageFailed || screen != Screen.BROWSER) return@post
+                val dialog = runtimeFailureDialog?.takeIf { it.isShowing } ?: ScriptFailureDialog(this, true,
+                    proceed = {},
+                    retry = { if (isCurrentNavigation()) openProfile(profile) },
+                    cancelVisit = { if (isCurrentNavigation()) { destroyWebView(); showProfiles() } }
+                ).also { runtimeFailureDialog = it; showNativeDialog(it) }
+                dialog.addFailure(script, message)
+            }
+        }
         userScriptHost?.let { scriptHandlers += it.install() }
         view.onResume()
         // Browser requests use WebView identity; direct media uses the profile proxy.
@@ -1067,7 +1239,6 @@ class MainActivity : AppCompatActivity() {
         binding.root.post {
             if (!isDestroyed && pageFailed && webView === failedView && navigationGeneration == failedNavigation) {
                 destroyWebView()
-                binding.returnButton.visibility = View.GONE
             }
         }
         if (screen in listOf(Screen.BROWSER, Screen.LOADING, Screen.ERROR)) {
@@ -1077,6 +1248,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun returnToPage() {
         if (webView != null && pageReady) showScreen(Screen.BROWSER) else launchLast()
+    }
+
+    private fun leaveProfileManager() {
+        if ((webView != null && pageReady) || config.lastProfile != null) returnToPage() else confirmExit()
     }
 
     private fun showLoading(title: Int) {
@@ -1102,12 +1277,14 @@ class MainActivity : AppCompatActivity() {
     private fun showConfigImport(file: Uri? = null) {
         commitProfileOrder()
         val dialog = ConfigImportDialog(this, defaultUserAgent, { config.profiles.size }, {
-            importFile.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
-        }) { imported ->
+            importFile.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/json", "text/*", "application/octet-stream"))
+        }, prepareBackup = ::prepareBackupData, backupRestored = { restored ->
+            applyRestoredBackup(restored)
+            toast(getString(R.string.import_success, restored.profiles.size))
+        }, recoveryRequired = ::blockForBackupRecovery) { imported ->
             if (!persist(imported)) false else {
                 profileOrderDirty = false
-                profileFilter = profileFilter.copy(favoritesOnly = false).resolve(config)
-                rememberProfileCategory(profileFilter.categoryId)
+                rememberProfileFilter(profileFilter)
                 cancelDownload(); destroyWebView(); currentId = null
                 toast(getString(R.string.import_success, imported.profiles.size))
                 launchLast()
@@ -1119,8 +1296,32 @@ class MainActivity : AppCompatActivity() {
         file?.let { dialog.readFile(it) }
     }
 
-    private fun reportOperationError(error: Exception) {
-        runOnUiThread { if (!isDestroyed) toast(getString(R.string.operation_error, error.message.orEmpty())) }
+    private fun showWebDav() {
+        commitProfileOrder()
+        hideKeyboard()
+        showNativeDialog(WebDavDialog(this, defaultUserAgent, prepareData = ::prepareBackupData,
+            restored = ::applyRestoredBackup, recoveryRequired = ::blockForBackupRecovery))
+    }
+
+    private fun prepareBackupData() {
+        cancelDownload(); scriptLoader.close(); destroyWebView(); currentId = null
+        showProfiles()
+    }
+
+    private fun applyRestoredBackup(restoredConfig: AppConfig) {
+        config = restoredConfig
+        profileOrderDirty = false
+        rememberProfileFilter(ProfileFilter(profileUiPreferences.getString("categoryId", null),
+            profileUiPreferences.getBoolean("favoritesOnly", false)))
+        showProfiles()
+    }
+
+    private fun blockForBackupRecovery() {
+        backupRecoveryBlocked = true
+        binding.settingsButton.isEnabled = false
+        showError(R.string.page_error_title, getString(R.string.webdav_recovery_failed))
+        binding.retryButton.setOnClickListener { recreate() }
+        binding.editButton.visibility = View.GONE
     }
 
     private fun confirmExit() {
@@ -1152,7 +1353,6 @@ class MainActivity : AppCompatActivity() {
         scriptHandlers.clear()
         retiringView?.let { view ->
             runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatClipboard") }
-            runCatching { WebViewCompat.removeWebMessageListener(view, "LightboatGM") }
             runCatching { binding.webContainer.removeView(view) }
             runCatching { view.stopLoading() }
             runCatching { view.webChromeClient = null }
@@ -1178,7 +1378,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putString("exportSnapshot", exportSnapshot)
+        outState.putBoolean("pendingBackupExport", exportOptions != null)
+        exportOptions?.let { outState.putBoolean("exportScriptData", it.scriptData); outState.putBoolean("exportPreferences", it.preferences) }
         outState.putBoolean("manager", screen == Screen.PROFILES)
         outState.putBoolean("editor", screen == Screen.EDITOR)
         outState.putString("editingId", editingId)
@@ -1189,6 +1390,8 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("draftFavorite", binding.favoriteInput.isChecked)
         outState.putString("draftUrl", binding.websiteInput.text.toString())
         outState.putString("draftScript", binding.scriptInput.text.toString())
+        outState.putString("draftScripts", ConfigCodec.referencesJson(draftScripts).toString())
+        outState.putString("draftScriptLibrary", ConfigCodec.encode(AppConfig.EMPTY.copy(scriptLibrary = draftScriptLibrary)))
         outState.putString("draftUserAgent", binding.userAgentInput.text.toString())
         outState.putString("draftPlatform", editingPlatform.configValue)
         outState.putString("scanTarget", scanTarget?.name)
@@ -1210,6 +1413,13 @@ class MainActivity : AppCompatActivity() {
         updateChrome()
     }
     override fun onResume() { super.onResume(); updateChrome() }
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (::binding.isInitialized && screen == Screen.PROFILES && event.actionMasked == MotionEvent.ACTION_DOWN) {
+            binding.scriptLibrary.collapseIfOutside(event.rawX, event.rawY)
+            binding.addButton.collapseIfOutside(event.rawX, event.rawY)
+        }
+        return super.dispatchTouchEvent(event)
+    }
     override fun onStop() {
         webView?.onPause()
         CookieManager.getInstance().flush()

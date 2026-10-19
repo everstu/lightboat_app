@@ -88,9 +88,23 @@ object MobileUserAgent {
                 val brands = "[{brand:'Chromium',version:'$major'},{brand:'Google Chrome',version:'$major'}]"
                 val fullVersions = "[{brand:'Chromium',version:'$version'},{brand:'Google Chrome',version:'$version'}]"
                 "{platform:'Win32',vendor:'Google Inc.',maxTouchPoints:0}" to
-                    "{brands:$brands,mobile:false,platform:'Windows',toJSON(){return this;}," +
-                    "getHighEntropyValues(){return Promise.resolve({...this,architecture:'x86',bitness:'64'," +
-                    "model:'',platformVersion:'10.0.0',uaFullVersion:'$version',fullVersionList:$fullVersions,wow64:false});}}"
+                    """(() => {
+                      const native = navigator.userAgentData;
+                      // WebSettings metadata also supplies the native JS API. Preserve its behavior.
+                      if (native && native.platform === 'Windows' && native.mobile === false) return native;
+                      const brands = $brands;
+                      const low = () => ({brands,mobile:false,platform:'Windows'});
+                      const high = {architecture:'x86',bitness:'64',model:'',platformVersion:'10.0.0',
+                        uaFullVersion:'$version',fullVersionList:$fullVersions,wow64:false};
+                      // Older WebViews need a stable fallback, with only the requested high-entropy keys.
+                      return {...low(),toJSON:low,async getHighEntropyValues(hints){
+                        const result = low();
+                        for (const name of hints) {
+                          if (Object.prototype.hasOwnProperty.call(high,name)) result[name] = high[name];
+                        }
+                        return result;
+                      }};
+                    })()""".trimIndent()
             }
         }
         return """(() => {
@@ -98,7 +112,10 @@ object MobileUserAgent {
           for (const [name, value] of Object.entries(values)) {
             try { Object.defineProperty(Navigator.prototype, name, { get: () => value, configurable: true }); } catch (_) {}
           }
-          try { Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => $userAgentData, configurable: true }); } catch (_) {}
+          const userAgentData = $userAgentData;
+          if (userAgentData !== navigator.userAgentData) {
+            try { Object.defineProperty(Navigator.prototype, 'userAgentData', { get: () => userAgentData, configurable: true }); } catch (_) {}
+          }
         })();
         //# sourceURL=lightboat-platform-identity.js"""
     }

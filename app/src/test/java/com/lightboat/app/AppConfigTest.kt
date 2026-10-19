@@ -4,8 +4,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AppConfigTest {
-    private val first = Profile("first", "工作", "https://example.com", "https://example.com/a.js")
-    private val second = Profile("second", "测试", "http://localhost:8080", "http://localhost:8080/b.js")
+    private val first = Profile("first", "工作", "https://example.com")
+    private val second = Profile("second", "测试", "http://localhost:8080")
 
     @Test fun firstProfileIsStartupProfile() {
         assertEquals(first, AppConfig.EMPTY.upsert(first).lastProfile)
@@ -54,7 +54,7 @@ class AppConfigTest {
     }
 
     @Test fun profilesWithoutScriptsRoundTrip() {
-        val profile = first.copy(scriptUrl = "")
+        val profile = first.copy(scripts = emptyList())
         val config = AppConfig.EMPTY.upsert(profile)
         assertEquals(config, ConfigCodec.decode(ConfigCodec.encode(config)))
     }
@@ -62,14 +62,14 @@ class AppConfigTest {
     @Test fun missingNullOrBlankScriptAddressMeansNoInjectedScript() {
         listOf("", ",\"scriptUrl\":null", ",\"scriptUrl\":\"\"", ",\"scriptUrl\":\"   \"").forEach { optionalField ->
             val json = """{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"普通网页","url":"https://example.com"$optionalField}]}"""
-            assertEquals("", ConfigCodec.decode(json).lastProfile?.scriptUrl)
+            assertTrue(ConfigCodec.decode(json).lastProfile!!.scripts.isEmpty())
         }
     }
 
     @Test fun aNonEmptyScriptAddressStillRequiresAValidHttpUrl() {
         listOf("javascript:alert(1)", "file:///tmp/script.js", "not-a-url").forEach { script ->
-            val config = AppConfig.EMPTY.upsert(first.copy(scriptUrl = script))
-            assertThrows(IllegalArgumentException::class.java) { ConfigCodec.decode(ConfigCodec.encode(config)) }
+            val text = """{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"a","url":"https://example.com","scriptUrl":"$script"}]}"""
+            assertThrows(IllegalArgumentException::class.java) { ConfigCodec.decode(text) }
         }
     }
 
@@ -102,7 +102,7 @@ class AppConfigTest {
 
     @Test fun malformedImportsAreRejectedWithoutGuessingSelection() {
         val valid = ConfigCodec.encode(AppConfig.EMPTY.upsert(first))
-        assertThrows(Exception::class.java) { ConfigCodec.decode(valid.replace("\"version\": 1", "\"version\": 2")) }
+        assertThrows(Exception::class.java) { ConfigCodec.decode(valid.replace("\"version\": 2", "\"version\": 3")) }
         assertThrows(Exception::class.java) { ConfigCodec.decode(valid.replace("\"lastProfileId\": \"first\"", "\"lastProfileId\": \"missing\"")) }
         assertThrows(Exception::class.java) { ConfigCodec.decode("""{"version":1,"lastProfileId":null,"profiles":[{"id":"x","name":"X","url":"file:///a","scriptUrl":"https://example.com/a.js"}]}""") }
         assertThrows(Exception::class.java) { ConfigCodec.decode(valid.replace("\"name\": \"工作\"", "\"name\": \"\"")) }

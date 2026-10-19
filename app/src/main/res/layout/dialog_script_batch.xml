@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent"
+    android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp" android:background="@drawable/bg_config_dialog">
+    <ScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView android:id="@+id/batchTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/script_batch_title" android:textSize="22sp" android:textStyle="bold" android:textColor="@color/ink" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp"
+                android:text="@string/script_batch_help" android:textSize="13sp" android:textColor="@color/muted" android:lineSpacingExtra="3dp" />
+            <TextView style="@style/FieldLabel" android:layout_marginTop="16dp" android:text="@string/script_batch_label" android:labelFor="@id/batchScriptsInput" />
+            <EditText android:id="@+id/batchScriptsInput" style="@style/UrlField" android:singleLine="false"
+                android:inputType="textMultiLine|textNoSuggestions" android:gravity="top|start" android:minLines="5" android:maxLines="12"
+                android:maxLength="1048576" android:hint="@string/script_batch_hint" android:textSize="14sp"
+                android:imeOptions="flagNoExtractUi" android:importantForAutofill="no" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp"
+                android:text="@string/script_batch_note" android:textSize="12sp" android:textColor="@color/muted" />
+        </LinearLayout>
+    </ScrollView>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp">
+        <Button android:id="@+id/cancelBatchScripts" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="48dp" android:text="@string/import_cancel" />
+        <Button android:id="@+id/confirmBatchScripts" style="@style/ConfigPrimary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="48dp" android:layout_marginStart="12dp" android:text="@string/script_batch_confirm" android:textSize="13sp" />
+    </LinearLayout>
+</LinearLayout>
