@@ -32,7 +32,10 @@ internal data class WebDavSettings(val directory: String, val username: String, 
     }
 }
 
-internal data class RemoteBackup(val exists: Boolean, val etag: String?, val modified: String?, val bytes: Long?)
+internal data class RemoteBackup(val exists: Boolean, val etag: String?, val modified: String?, val bytes: Long?) {
+    /** RFC 9110 strong validator (quoted, not weak); only these can guard a conditional overwrite. */
+    val strongEtag: String? get() = etag?.takeIf { it.startsWith("\"") && it.endsWith("\"") && !it.startsWith("W/") }
+}
 internal class WebDavConflict : Exception("远端备份已发生变化，请重新检查后再选择上传或恢复。")
 
 /** No browser cookies, profile UA, redirects or credentials in backups/logs. */
@@ -87,8 +90,7 @@ internal class WebDavClient(private val settings: WebDavSettings,
         require(file.isFile && file.length() in 1..maximumBytes) { "本地备份文件无效或过大" }
         val builder = request(settings.backupUrl).put(file.asRequestBody("application/zip".toMediaType()))
         if (expected.exists) {
-            val tag = expected.etag
-            require(tag != null && tag.startsWith('"') && tag.endsWith('"') && !tag.startsWith("W/")) {
+            val tag = requireNotNull(expected.strongEtag) {
                 "服务器未提供可用于版本校验的 ETag，无法安全覆盖已有备份；请使用空的备份目录。"
             }
             builder.header("If-Match", tag)

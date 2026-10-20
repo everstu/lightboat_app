@@ -30,6 +30,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import java.util.UUID
+import java.util.TimeZone
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -53,6 +54,9 @@ class WebDavBackupTest {
     @Volatile private var remoteVersion = 1
     @Volatile private var conflictOnPut = false
     @Volatile private var childExists = false
+    @Volatile private var remoteModified = "Mon, 19 Oct 2026 03:00:00 GMT"
+    @Volatile private var omitEtag = false
+    @Volatile private var weakEtag = false
     private val directoriesCreated = AtomicInteger()
     private val puts = AtomicInteger()
     private val successfulPuts = AtomicInteger()
@@ -78,8 +82,9 @@ class WebDavBackupTest {
                 "HEAD", "GET" -> {
                     val bytes = remote
                     if (bytes == null || request.path != "/dav/lightboat/lightboat-backup.zip") MockResponse().setResponseCode(404)
-                    else MockResponse().addHeader("Content-Type", "application/zip").addHeader("ETag", "\"version-$remoteVersion\"")
-                        .addHeader("Last-Modified", "Mon, 19 Oct 2026 03:00:00 GMT").apply {
+                    else MockResponse().addHeader("Content-Type", "application/zip")
+                        .addHeader("Last-Modified", remoteModified).apply {
+                            if (!omitEtag) addHeader("ETag", (if (weakEtag) "W/" else "") + "\"version-$remoteVersion\"")
                             if (request.method == "GET") setBody(Buffer().write(bytes)) else addHeader("Content-Length", bytes.size)
                         }
                 }
@@ -208,6 +213,97 @@ class WebDavBackupTest {
         assertEquals("existing remote backup", String(requireNotNull(remote)))
         click(R.id.uploadWebdav); waitPreview(); click(R.id.webdavConfirm); waitText("备份上传完成")
         assertEquals(1, successfulPuts.get())
+    }
+
+    @Test fun remoteCheckFinishesBeforeWaitingForUploadConfirmation() {
+        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(configA())
+        remote = "existing backup".toByteArray()
+        launchManager(); openDialog(); fillServer()
+        for (accepted in listOf(false, true)) {
+            if (accepted) context.getSharedPreferences("webdav", 0).edit().putString("etag", "\"version-1\"").commit()
+            click(R.id.uploadWebdav); waitPreview()
+            assertEquals(context.getString(R.string.webdav_check_complete), status())
+            scenario!!.onActivity { activity ->
+                assertFalse(dialog(activity).findViewById<View>(R.id.webdavProgress)!!.isShown)
+                assertTrue(dialog(activity).findViewById<View>(R.id.webdavConfirm)!!.isEnabled)
+                val title = if (accepted) R.string.webdav_upload_title else R.string.webdav_conflict_title
+                assertEquals(context.getString(title), dialog(activity).findViewById<TextView>(R.id.webdavPreviewTitle)!!.text.toString())
+            }
+            click(R.id.webdavPreviewBack)
+        }
+    }
+
+    @Test fun aServerWithoutStrongEtagsReportsUnsafeOverwriteAndStillAllowsReads() =
+        verifyUnsafeOverwriteStillAllowsRestore(weak = false)
+
+    @Test fun aServerWithWeakEtagsReportsUnsafeOverwriteAndStillAllowsRestore() =
+        verifyUnsafeOverwriteStillAllowsRestore(weak = true)
+
+    private fun verifyUnsafeOverwriteStillAllowsRestore(weak: Boolean) {
+        val original = configA()
+        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(original)
+        ScriptStorage.exclusive { ScriptValueStore(context, identity).update("owner", encoded("remote-device")) }
+        val repository = BackupRepository(context, AppConfig.DEFAULT_USER_AGENT)
+        val workspace = File(saved, "etag-check").apply { mkdirs() }
+        val archive = File(saved, "etag-backup.zip")
+        repository.create(archive, workspace)
+        remote = archive.readBytes()
+        omitEtag = !weak
+        weakEtag = weak
+        val localConfig = configB()
+        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(localConfig)
+        ScriptStorage.exclusive { values.deleteRecursively(); values.mkdirs() }
+        launchManager(); openDialog(); fillServer()
+        click(R.id.uploadWebdav)
+        waitFor {
+            var visible = false
+            scenario!!.onActivity { activity -> visible = dialog(activity).findViewById<View>(R.id.webdavPreview)!!.visibility == View.VISIBLE }
+            visible
+        }
+        scenario!!.onActivity { activity ->
+            assertEquals(context.getString(R.string.webdav_unsafe_overwrite_title),
+                dialog(activity).findViewById<TextView>(R.id.webdavPreviewTitle)!!.text.toString())
+            assertFalse(dialog(activity).findViewById<View>(R.id.webdavConfirm)!!.isEnabled)
+        }
+        assertEquals(context.getString(R.string.webdav_check_unsupported), status())
+        assertEquals(0, puts.get())
+        assertEquals(localConfig, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load())
+        click(R.id.webdavPreviewBack)
+        click(R.id.downloadWebdav); waitPreview()
+        assertEquals(localConfig, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load())
+        click(R.id.webdavConfirm); waitText("恢复完成")
+        assertEquals(original, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load())
+        ScriptStorage.exclusive {
+            assertEquals("remote-device", JSONObject(ScriptValueStore(context, identity).encoded("owner")!!).getString("value"))
+        }
+        assertEquals(0, puts.get())
+        assertFalse(local.exists())
+    }
+
+    @Test fun remoteModificationTimesUseThePhoneTimeZoneForHttpAndIsoDates() {
+        val savedZone = TimeZone.getDefault()
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+        try {
+            ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(configA())
+            remote = "existing backup".toByteArray()
+            launchManager(); openDialog(); fillServer()
+            val times = listOf(
+                "Mon, 19 Oct 2026 09:38:38 GMT" to "2026-10-19 17:38:38 GMT+08:00",
+                "2026-10-19T16:31:31.978135517+08:00" to "2026-10-19 16:31:31 GMT+08:00",
+                "2026-10-19T08:31:31.978135517Z" to "2026-10-19 16:31:31 GMT+08:00",
+                "unknown" to context.getString(R.string.webdav_unknown_time),
+            )
+            for ((serverTime, localTime) in times) {
+                remoteModified = serverTime
+                click(R.id.uploadWebdav); waitPreview()
+                scenario!!.onActivity { activity ->
+                    val details = dialog(activity).findViewById<TextView>(R.id.webdavPreviewDetails)!!.text.toString()
+                    assertTrue("Expected local time $localTime, got $details", details.contains(localTime))
+                }
+                if (serverTime.endsWith("Z")) capture("webdav-upload-local-time")
+                click(R.id.webdavPreviewBack)
+            }
+        } finally { TimeZone.setDefault(savedZone) }
     }
 
     @Test fun backupWaitsForPreviouslyQueuedGmWritesAndIncludesAtomicRecoverySidecars() {

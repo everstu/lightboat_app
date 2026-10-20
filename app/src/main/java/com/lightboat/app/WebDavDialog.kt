@@ -3,8 +3,6 @@ package com.lightboat.app
 import android.content.Context
 import android.graphics.Rect
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.View
 import android.view.ViewTreeObserver
 import android.view.Window
@@ -25,12 +23,12 @@ import com.lightboat.app.backup.WebDavClient
 import com.lightboat.app.backup.WebDavConflict
 import com.lightboat.app.backup.WebDavSettings
 import com.lightboat.app.backup.WebDavSettingsStore
+import com.lightboat.app.backup.WebDavTime
 import com.lightboat.app.databinding.DialogWebdavBinding
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
-import java.util.concurrent.Executors
 
 /** Manual backup/restore only; all network and large-file work stays off the UI thread. */
 internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: String,
@@ -42,11 +40,9 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
     private val optionsStore = BackupOptionsStore(activity)
     private val repository = BackupRepository(activity, defaultUserAgent)
     private val workspace = File(activity.cacheDir, "webdav-${UUID.randomUUID()}")
-    private val worker = Executors.newSingleThreadExecutor()
-    private val main = Handler(Looper.getMainLooper())
+    private val tasks = DialogWorker()
     private var network: WebDavClient? = null
     private var activeSettings: WebDavSettings? = null
-    @Volatile private var closed = false
     private var busy = false
     private var critical = false
     private var pending: Pending? = null
@@ -123,10 +119,20 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
         task(context.getString(R.string.webdav_checking_remote), { client.inspect() }) { remote ->
             if (!remote.exists) upload(settings, remote, options) else {
                 pending = Pending.Upload(remote, settings, options)
-                val changed = settingsStore.acceptedVersion() != remote.etag || remote.etag == null
-                binding.webdavPreviewTitle.setText(if (changed) R.string.webdav_conflict_title else R.string.webdav_upload_title)
-                binding.webdavPreviewDetails.text = context.getString(if (changed) R.string.webdav_conflict_message else R.string.webdav_replace_message,
-                    remote.modified ?: context.getString(R.string.webdav_unknown_time))
+                val time = WebDavTime.format(remote.modified) ?: context.getString(R.string.webdav_unknown_time)
+                // A missing strong validator cannot prove the remote still matches the
+                // local record: report that overwrite is unsupported instead of guessing
+                // "another version", which the upload would then refuse anyway.
+                if (remote.strongEtag == null) {
+                    binding.webdavPreviewTitle.setText(R.string.webdav_unsafe_overwrite_title)
+                    binding.webdavPreviewDetails.text = context.getString(R.string.webdav_unsafe_overwrite_message, time)
+                    feedback(context.getString(R.string.webdav_check_unsupported))
+                } else {
+                    val changed = settingsStore.acceptedVersion() != remote.strongEtag
+                    binding.webdavPreviewTitle.setText(if (changed) R.string.webdav_conflict_title else R.string.webdav_upload_title)
+                    binding.webdavPreviewDetails.text = context.getString(if (changed) R.string.webdav_conflict_message else R.string.webdav_replace_message, time)
+                    feedback(context.getString(R.string.webdav_check_complete))
+                }
                 binding.webdavConfirm.setText(R.string.webdav_replace_remote)
                 updateControls(); revealPreview()
             }
@@ -141,7 +147,7 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
             val file = File(workspace, "upload-${UUID.randomUUID()}.zip")
             try {
                 val info = repository.create(file, workspace, options)
-                check(!closed) { "操作已取消" }
+                check(!tasks.closed) { "操作已取消" }
                 val result = client.upload(file, expected)
                 settingsStore.accept(result.etag, false)
                 info
@@ -180,7 +186,7 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
         prepareData()
         val options = binding.webdavRestoreOptions.options
         task(context.getString(R.string.webdav_restoring), {
-            val config = repository.restore(action.backup, options) { !closed }
+            val config = repository.restore(action.backup, options) { !tasks.closed }
             // A bookkeeping failure must not turn a completed restore into an apparent rollback.
             runCatching { settingsStore.accept(action.remote.etag, true) }
             config
@@ -216,7 +222,9 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
         binding.webdavBackupOptions.setControlsEnabled(!busy)
         binding.webdavRestoreOptions.setControlsEnabled(!busy)
         listOf(binding.webdavDirectory, binding.webdavUsername, binding.webdavPassword, binding.testWebdav, binding.saveWebdav,
-            binding.uploadWebdav, binding.downloadWebdav, binding.webdavPreviewBack, binding.webdavConfirm).forEach { it.isEnabled = !busy }
+            binding.uploadWebdav, binding.downloadWebdav, binding.webdavPreviewBack).forEach { it.isEnabled = !busy }
+        // Overwrite needs a strong remote validator; restore always stays available.
+        binding.webdavConfirm.isEnabled = !busy && (pending is Pending.Restore || (pending as? Pending.Upload)?.remote?.strongEtag != null)
         binding.closeWebdav.isEnabled = !critical
         binding.webdavProgress.visibility = if (busy) View.VISIBLE else View.GONE
         setCancelable(!critical)
@@ -224,50 +232,42 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
     }
 
     private fun <T> task(label: String, work: () -> T, criticalOperation: Boolean = false, complete: (T) -> Unit) {
-        if (busy || closed) return
+        if (busy || tasks.closed) return
         busy = true; critical = criticalOperation; feedback(label); updateControls()
-        worker.execute {
-            val result = runCatching(work)
-            main.post {
-                if (closed) return@post
-                busy = false; critical = false
-                result.fold(onSuccess = complete, onFailure = { error ->
-                    if (criticalOperation) pending = null
-                    val message = when (error) {
-                        is WebDavConflict -> { pending = null; error.message.orEmpty() }
-                        is java.util.zip.ZipException -> context.getString(R.string.webdav_invalid_backup)
-                        is java.io.InterruptedIOException -> context.getString(R.string.webdav_timeout)
-                        is java.io.IOException -> context.getString(R.string.webdav_network_error)
-                        is org.json.JSONException -> context.getString(R.string.webdav_invalid_backup)
-                        else -> error.message ?: context.getString(R.string.webdav_failed)
-                    }
-                    feedback(message, true)
-                    DebugLog.event("webdav", "operation failed type=${error.javaClass.simpleName}")
-                    if (criticalOperation && BackupTransaction.requiresRecovery(context.filesDir)) {
-                        dismiss(); recoveryRequired(); return@post
-                    }
-                })
-                updateControls()
-            }
+        tasks.execute(work) { result ->
+            busy = false; critical = false
+            var recovered = false
+            result.fold(onSuccess = complete, onFailure = { error ->
+                if (criticalOperation) pending = null
+                val message = when (error) {
+                    is WebDavConflict -> { pending = null; error.message.orEmpty() }
+                    is java.util.zip.ZipException -> context.getString(R.string.webdav_invalid_backup)
+                    is java.io.InterruptedIOException -> context.getString(R.string.webdav_timeout)
+                    is java.io.IOException -> context.getString(R.string.webdav_network_error)
+                    is org.json.JSONException -> context.getString(R.string.webdav_invalid_backup)
+                    else -> error.message ?: context.getString(R.string.webdav_failed)
+                }
+                feedback(message, true)
+                DebugLog.event("webdav", "operation failed type=${error.javaClass.simpleName}")
+                if (criticalOperation && BackupTransaction.requiresRecovery(context.filesDir)) {
+                    dismiss(); recoveryRequired(); recovered = true
+                }
+            })
+            if (!recovered) updateControls()
         }
     }
 
     override fun onStart() { super.onStart(); binding.root.viewTreeObserver.addOnGlobalLayoutListener(layoutChanged); updateLayout() }
     override fun onStop() {
-        if (closed) { super.onStop(); return }
-        closed = true; network?.close(); main.removeCallbacksAndMessages(null)
+        tasks.close { workspace.deleteRecursively() }
+        network?.close()
         binding.root.viewTreeObserver.removeOnGlobalLayoutListener(layoutChanged)
         // A restore already exchanging files must reach commit or rollback.
-        worker.execute { workspace.deleteRecursively() }; worker.shutdown()
         super.onStop()
     }
     override fun updateLayout() {
-        val density = context.resources.displayMetrics.density
-        val visible = Rect().also { window?.decorView?.getWindowVisibleDisplayFrame(it) }
-        val width = minOf((600 * density).toInt(), context.resources.displayMetrics.widthPixels - (24 * density).toInt())
-        val maximum = minOf((720 * density).toInt(), visible.height() - (24 * density).toInt()).coerceAtLeast(1)
-        binding.root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(maximum, View.MeasureSpec.AT_MOST))
-        val height = binding.root.measuredHeight
-        window?.let { if (it.attributes.width != width || it.attributes.height != height) it.setLayout(width, height) }
+        val width = DialogLayout.width(context)
+        val maximum = minOf(DialogLayout.dp(context, 720), DialogLayout.visibleHeight(window) - DialogLayout.dp(context, 24))
+        DialogLayout.apply(window, binding.root, width, maximum)
     }
 }

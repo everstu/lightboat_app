@@ -1,8 +1,6 @@
 package com.lightboat.app
 
-import android.graphics.Rect
 import android.os.Bundle
-import android.view.View
 import android.view.ViewTreeObserver
 import android.view.Window
 import android.view.WindowManager
@@ -36,13 +34,7 @@ internal class ScriptBatchDialog(activity: AppCompatActivity, private val add: (
     override fun onStart() { super.onStart(); binding.root.viewTreeObserver.addOnGlobalLayoutListener(layoutChanged); updateLayout() }
     override fun onStop() { binding.root.viewTreeObserver.removeOnGlobalLayoutListener(layoutChanged); super.onStop() }
     override fun updateLayout() {
-        val density = context.resources.displayMetrics.density
-        val visible = Rect().also { window?.decorView?.getWindowVisibleDisplayFrame(it) }
-        val width = minOf((600 * density).toInt(), context.resources.displayMetrics.widthPixels - (24 * density).toInt())
-        val maximumHeight = minOf((520 * density).toInt(), visible.height() - (16 * density).toInt()).coerceAtLeast(1)
-        binding.root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(maximumHeight, View.MeasureSpec.AT_MOST))
-        val height = binding.root.measuredHeight
-        window?.let { if (it.attributes.width != width || it.attributes.height != height) it.setLayout(width, height) }
+        val maxHeight = minOf(DialogLayout.dp(context, 520), DialogLayout.visibleHeight(window) - DialogLayout.dp(context, 16))
+        DialogLayout.apply(window, binding.root, DialogLayout.width(context), maxHeight)
     }
 }

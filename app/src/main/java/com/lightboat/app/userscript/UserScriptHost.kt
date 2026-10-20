@@ -91,6 +91,21 @@ class UserScriptHost(
         var upload: ScriptValueUpload? = null // Serial storage-worker access only.
         var uploadId: String? = null
     }
+
+    companion object {
+        // Single operation table: adding an operation only extends this map and the dispatch below.
+        private val VALUE_WRITES = listOf("GM_setValue", "GM.setValue", "GM_setValues", "GM.setValues")
+        private val OPERATIONS: Map<String, List<String>> = mapOf(
+            "setValue" to VALUE_WRITES, "valueBegin" to VALUE_WRITES, "valueChunk" to VALUE_WRITES,
+            "deleteValue" to listOf("GM_deleteValue", "GM.deleteValue", "GM_deleteValues", "GM.deleteValues"),
+            "menuRegister" to listOf("GM_registerMenuCommand", "GM.registerMenuCommand"),
+            "menuRemove" to listOf("GM_unregisterMenuCommand", "GM.unregisterMenuCommand"),
+            "clipboard" to listOf("GM_setClipboard", "GM.setClipboard"),
+            "notification" to listOf("GM_notification", "GM.notification"),
+            "xhr" to listOf("GM_xmlhttpRequest", "GM.xmlHttpRequest"),
+        )
+    }
+
     private val token = UUID.randomUUID().toString()
     private val bridgeName = "LightboatGM_" + token.replace("-", "")
     val consoleSource = "lightboat-userscript-" + UUID.nameUUIDFromBytes(script.id.toByteArray()).toString() + ".js"
@@ -213,16 +228,7 @@ class UserScriptHost(
                     ScriptStorage.cleanup { session.upload?.close(); session.upload = null; session.uploadId = null }
                     return@addWebMessageListener
                 }
-                val permission = when (op) {
-                    "setValue", "valueBegin", "valueChunk" -> listOf("GM_setValue", "GM.setValue", "GM_setValues", "GM.setValues")
-                    "deleteValue" -> listOf("GM_deleteValue", "GM.deleteValue", "GM_deleteValues", "GM.deleteValues")
-                    "menuRegister" -> listOf("GM_registerMenuCommand", "GM.registerMenuCommand")
-                    "menuRemove" -> listOf("GM_unregisterMenuCommand", "GM.unregisterMenuCommand")
-                    "clipboard" -> listOf("GM_setClipboard", "GM.setClipboard")
-                    "notification" -> listOf("GM_notification", "GM.notification")
-                    "xhr" -> listOf("GM_xmlhttpRequest", "GM.xmlHttpRequest")
-                    else -> error("不支持 GM 操作 $op")
-                }
+                val permission = OPERATIONS[op] ?: error("不支持 GM 操作 $op")
                 require(permission.any { meta.permits(it) }) { "@grant 未授权 $op" }
                 fun broadcast(recipients: List<Session>, key: String, value: String?) {
                     // Run within the write task, before its acknowledgement and the next

@@ -98,21 +98,28 @@ data class AppConfig(
         scriptLibrary.firstOrNull { it.id == ref.scriptId } ?: error("配置引用的脚本不存在")
     }
 
-    fun upsertScript(script: SharedScript): AppConfig {
-        require(script.id.isNotBlank() && script.id.length <= 100) { "脚本 ID 无效" }
-        val url = normalizeScriptUrl(script.url)
-        val normalized = script.copy(name = normalizeScriptName(script.name, url), url = url)
-        require(scriptLibrary.none { it.id != script.id && it.url == normalized.url }) { "这个地址已在脚本库中，请直接选择已有脚本" }
-        val next = if (scriptLibrary.any { it.id == script.id }) scriptLibrary.map { if (it.id == script.id) normalized else it }
-            else scriptLibrary + normalized
-        require(next.size <= MAX_LIBRARY_SCRIPTS) { "脚本库最多保存 $MAX_LIBRARY_SCRIPTS 个脚本" }
-        return copy(scriptLibrary = next)
-    }
+    fun upsertScript(script: SharedScript): AppConfig = copy(scriptLibrary = upsertScript(scriptLibrary, script))
+
+    /** Replace the shared library and drop profile references that no longer resolve. */
+    fun replaceScriptLibrary(library: List<SharedScript>): AppConfig = copy(scriptLibrary = library,
+        profiles = profiles.map { profile -> profile.copy(scripts = profile.scripts.filter { ref -> library.any { it.id == ref.scriptId } }) })
 
     fun removeScript(id: String): AppConfig = copy(scriptLibrary = scriptLibrary.filterNot { it.id == id },
         profiles = profiles.map { it.copy(scripts = it.scripts.filterNot { ref -> ref.scriptId == id }) })
 
     companion object {
+        /** Normalize, validate and merge [script] into [library] without touching any config. */
+        fun upsertScript(library: List<SharedScript>, script: SharedScript): List<SharedScript> {
+            require(script.id.isNotBlank() && script.id.length <= 100) { "脚本 ID 无效" }
+            val url = normalizeScriptUrl(script.url)
+            val normalized = script.copy(name = normalizeScriptName(script.name, url), url = url)
+            require(library.none { it.id != script.id && it.url == normalized.url }) { "这个地址已在脚本库中，请直接选择已有脚本" }
+            val next = if (library.any { it.id == script.id }) library.map { if (it.id == script.id) normalized else it }
+                else library + normalized
+            require(next.size <= MAX_LIBRARY_SCRIPTS) { "脚本库最多保存 $MAX_LIBRARY_SCRIPTS 个脚本" }
+            return next
+        }
+
         const val MAX_PROFILES = 50
         const val MAX_CATEGORY_NAME = 60
         const val MAX_PROFILE_SCRIPTS = 16

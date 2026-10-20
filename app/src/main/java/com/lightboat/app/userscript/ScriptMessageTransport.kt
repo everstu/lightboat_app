@@ -51,11 +51,15 @@ internal class ScriptMessageTransport(private val doc: String, private val reply
             val packet = JSONObject().put("doc", doc).put("event", "bridgeChunk").put("transfer", transfer)
                 .put("index", index).put("total", total).put("last", sent == total).put("text", text).toString()
             main.post {
-                if (closed) pending.latch.countDown() else try { reply.postMessage(packet) }
+                if (closed || waiting[transfer] !== pending) pending.latch.countDown() else try { reply.postMessage(packet) }
                 catch (_: Exception) { pending.latch.countDown() }
             }
             try {
-                if (!pending.latch.await(15, TimeUnit.SECONDS) || !pending.accepted) throw IOException("GM 分片传输已取消或超时")
+                if (!pending.latch.await(15, TimeUnit.SECONDS) || !pending.accepted) {
+                    // Abort only this transfer. The same live document may acknowledge
+                    // later requests after a pause; only document disposal closes it.
+                    throw IOException("GM 分片传输已取消或超时")
+                }
             } finally { waiting.remove(transfer, pending) }
             index++
         }

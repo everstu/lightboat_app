@@ -67,6 +67,7 @@ import com.lightboat.app.userscript.ScriptPreparer
 import com.lightboat.app.userscript.UserScriptGroup
 import com.lightboat.app.userscript.PreparedScript
 import com.lightboat.app.userscript.ScriptInstallationException
+import com.lightboat.app.userscript.utf8ByteLength
 import org.json.JSONArray
 
 class MainActivity : AppCompatActivity() {
@@ -426,9 +427,8 @@ class MainActivity : AppCompatActivity() {
                 window?.apply {
                     setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
                     setGravity(Gravity.BOTTOM)
-                    val density = resources.displayMetrics.density
-                    attributes = attributes.apply { y = (12 * density).toInt() }
-                    setLayout(minOf(resources.displayMetrics.widthPixels - (32 * density).toInt(), (560 * density).toInt()),
+                    attributes = attributes.apply { y = DialogLayout.dp(this@MainActivity, 12) }
+                    setLayout(DialogLayout.width(this@MainActivity, maxWidthDp = 560, marginDp = 32),
                         WindowManager.LayoutParams.WRAP_CONTENT)
                     addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
                     setDimAmount(0.38f)
@@ -747,7 +747,7 @@ class MainActivity : AppCompatActivity() {
         val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, draftScripts, userAgent, editingPlatform,
             previous?.categoryId, binding.favoriteInput.isChecked)
         val next = try {
-            withScriptLibrary(draftScriptLibrary).upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
+            config.replaceScriptLibrary(draftScriptLibrary).upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
         } catch (error: Exception) {
             toast(error.message.orEmpty()); return
         }
@@ -768,9 +768,6 @@ class MainActivity : AppCompatActivity() {
         toast(getString(R.string.operation_error, error.message.orEmpty()))
         false
     }
-
-    private fun withScriptLibrary(library: List<SharedScript>): AppConfig = config.copy(scriptLibrary = library,
-        profiles = config.profiles.map { profile -> profile.copy(scripts = profile.scripts.filter { ref -> library.any { it.id == ref.scriptId } }) })
 
     private fun renderDraftScripts() {
         binding.selectedScriptsSummary.text = if (draftScripts.isEmpty()) getString(R.string.script_none_selected)
@@ -837,7 +834,7 @@ class MainActivity : AppCompatActivity() {
         }
         val script = existing ?: SharedScript(UUID.randomUUID().toString(),
             AppConfig.defaultScriptName(url), url)
-        try { draftScriptLibrary = config.copy(scriptLibrary = draftScriptLibrary).upsertScript(script).scriptLibrary }
+        try { draftScriptLibrary = AppConfig.upsertScript(draftScriptLibrary, script) }
         catch (error: IllegalArgumentException) { binding.scriptInput.error = error.message; return false }
         if (draftScripts.none { it.scriptId == script.id }) draftScripts += ProfileScript(script.id)
         binding.scriptInput.setText("")
@@ -856,7 +853,7 @@ class MainActivity : AppCompatActivity() {
     private fun showScriptLibrary() {
         commitProfileOrder()
         showNativeDialog(ScriptLibraryDialog(this, config, null) { library, _ ->
-            if (persist(withScriptLibrary(library))) { renderProfiles(); true } else false
+            if (persist(config.replaceScriptLibrary(library))) { renderProfiles(); true } else false
         })
     }
 
@@ -946,8 +943,8 @@ class MainActivity : AppCompatActivity() {
                             ) { resultBundle ->
                                 if (!current()) return@prepare
                                 resultBundle.fold(onSuccess = { bundle ->
-                                    val bundleBytes = bundle.source.toByteArray(Charsets.UTF_8).size +
-                                        bundle.requirements.sumOf { it.toByteArray(Charsets.UTF_8).size } + bundle.resources.toString().toByteArray(Charsets.UTF_8).size
+                                    val bundleBytes = utf8ByteLength(bundle.source) +
+                                        bundle.requirements.sumOf(::utf8ByteLength) + utf8ByteLength(bundle.resources.toString())
                                     if (totalBytes + bundleBytes > 16 * 1024 * 1024) {
                                         fail(script, IllegalArgumentException("当前配置的脚本及依赖合计不能超过 16 MiB"))
                                     } else {

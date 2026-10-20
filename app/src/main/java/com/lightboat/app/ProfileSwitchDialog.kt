@@ -102,7 +102,7 @@ internal class ProfileSwitchDialog(
         binding.switchFooter.setPadding((20 * density).toInt(), ((if (compact) 8 else 12) * density).toInt(),
             (20 * density).toInt(), ((if (compact) 12 else 20) * density).toInt())
         entries.setCompact(compact)
-        val width = minOf(context.resources.displayMetrics.widthPixels - (32 * density).toInt(), (560 * density).toInt())
+        val width = DialogLayout.width(context, maxWidthDp = 560, marginDp = 32)
         val safeInsets = ViewCompat.getRootWindowInsets(activity.window.decorView)
             ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
         val safeHeight = activity.resources.displayMetrics.heightPixels -

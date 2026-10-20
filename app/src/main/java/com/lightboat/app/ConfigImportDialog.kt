@@ -2,8 +2,6 @@ package com.lightboat.app
 
 import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
@@ -18,7 +16,6 @@ import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.SocketTimeoutException
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.io.File
 import java.util.UUID
@@ -34,8 +31,7 @@ internal class ConfigImportDialog(
     private val applyImport: (AppConfig) -> Boolean,
 ) : AlertDialog(activity) {
     private val binding = DialogImportConfigBinding.inflate(activity.layoutInflater)
-    private val worker = Executors.newSingleThreadExecutor()
-    private val main = Handler(Looper.getMainLooper())
+    private val tasks = DialogWorker()
     private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS).callTimeout(10, TimeUnit.MINUTES).build()
     private val repository = BackupRepository(activity, defaultUserAgent)
@@ -44,7 +40,6 @@ internal class ConfigImportDialog(
     private var imported: BackupImportData? = null
     private var fileMode = false
     private var busy = false
-    @Volatile private var closed = false
     private var critical = false
     private var requestId = 0
 
@@ -75,13 +70,13 @@ internal class ConfigImportDialog(
     }
 
     private fun chooseLocalFile() {
-        if (!fileMode || busy || closed || imported != null) return
+        if (!fileMode || busy || tasks.closed || imported != null) return
         hideKeyboard()
         chooseFile()
     }
 
     fun readFile(uri: Uri) {
-        if (closed) return
+        if (tasks.closed) return
         selectSource(true)
         load(R.string.import_loading_file) {
             (activity.contentResolver.openInputStream(uri) ?: error(context.getString(R.string.import_read_failed)))
@@ -112,50 +107,47 @@ internal class ConfigImportDialog(
     }
 
     private fun load(label: Int, read: () -> BackupImportData) {
-        if (busy || closed) return
+        if (busy || tasks.closed) return
         val id = ++requestId
         busy = true
         imported = null
         updateControls()
         showFeedback(context.getString(label), false)
-        worker.execute {
-            val result = runCatching { read() }
-            main.post {
-                if (closed || id != requestId) return@post
-                busy = false
-                call = null
-                result.onSuccess { data ->
-                    imported = data
-                    val config = data.config
-                    val summary = if (data.archive != null) {
-                        val info = data.archive.info
-                        binding.importBackupOptions.configure(info.options, info.options, restore = true)
-                        context.getString(R.string.webdav_backup_summary,
-                            java.text.DateFormat.getDateTimeInstance().format(java.util.Date(info.createdAt)), info.device,
-                            info.profiles, info.scripts, info.stores, android.text.format.Formatter.formatShortFileSize(context, info.bytes)) +
-                            "\n\n" + context.getString(R.string.backup_import_replace_note)
-                    } else if (config.profiles.isEmpty()) {
-                        context.getString(R.string.import_empty_confirm, currentCount())
-                    } else context.getString(R.string.import_message, config.profiles.size, currentCount(),
-                        config.lastProfile?.name ?: context.getString(R.string.import_no_startup))
-                    showFeedback(summary, false)
-                }.onFailure { error ->
-                    val message = when (error) {
-                        is IllegalArgumentException -> error.message ?: context.getString(R.string.import_read_failed)
-                        is SocketTimeoutException, is java.io.InterruptedIOException -> context.getString(R.string.import_timeout)
-                        is java.io.IOException -> context.getString(if (fileMode) R.string.import_read_failed else R.string.import_network_failed)
-                        else -> context.getString(R.string.import_read_failed)
-                    }
-                    showFeedback(message, true)
+        tasks.execute(read) { result ->
+            if (id != requestId) return@execute
+            busy = false
+            call = null
+            result.onSuccess { data ->
+                imported = data
+                val config = data.config
+                val summary = if (data.archive != null) {
+                    val info = data.archive.info
+                    binding.importBackupOptions.configure(info.options, info.options, restore = true)
+                    context.getString(R.string.webdav_backup_summary,
+                        java.text.DateFormat.getDateTimeInstance().format(java.util.Date(info.createdAt)), info.device,
+                        info.profiles, info.scripts, info.stores, android.text.format.Formatter.formatShortFileSize(context, info.bytes)) +
+                        "\n\n" + context.getString(R.string.backup_import_replace_note)
+                } else if (config.profiles.isEmpty()) {
+                    context.getString(R.string.import_empty_confirm, currentCount())
+                } else context.getString(R.string.import_message, config.profiles.size, currentCount(),
+                    config.lastProfile?.name ?: context.getString(R.string.import_no_startup))
+                showFeedback(summary, false)
+            }.onFailure { error ->
+                val message = when (error) {
+                    is IllegalArgumentException -> error.message ?: context.getString(R.string.import_read_failed)
+                    is SocketTimeoutException, is java.io.InterruptedIOException -> context.getString(R.string.import_timeout)
+                    is java.io.IOException -> context.getString(if (fileMode) R.string.import_read_failed else R.string.import_network_failed)
+                    else -> context.getString(R.string.import_read_failed)
                 }
-                updateControls()
+                showFeedback(message, true)
             }
+            updateControls()
         }
     }
 
     private fun selectSource(useFile: Boolean) {
         if (busy) return
-        imported?.archive?.directory?.let { directory -> worker.execute { directory.deleteRecursively() } }
+        imported?.archive?.directory?.let { directory -> tasks.background { directory.deleteRecursively() } }
         fileMode = useFile
         imported = null
         binding.importFeedback.visibility = View.GONE
@@ -196,23 +188,19 @@ internal class ConfigImportDialog(
 
     private fun restoreBackup(data: BackupImportData) {
         val archive = data.archive ?: return
-        if (busy || closed) return
+        if (busy || tasks.closed) return
         val options = binding.importBackupOptions.options
         prepareBackup()
         busy = true; critical = true
         showFeedback(context.getString(R.string.webdav_restoring), false); updateControls()
-        worker.execute {
-            val result = runCatching { repository.restore(archive, options) { !closed } }
-            main.post {
-                if (closed) return@post
-                busy = false; critical = false
-                result.onSuccess { config -> backupRestored(config); dismiss() }.onFailure { error ->
-                    imported = null
-                    showFeedback(error.message ?: context.getString(R.string.import_read_failed), true)
-                    if (BackupTransaction.requiresRecovery(context.filesDir)) { dismiss(); recoveryRequired() }
-                }
-                updateControls()
+        tasks.execute({ repository.restore(archive, options) { !tasks.closed } }) { result ->
+            busy = false; critical = false
+            result.onSuccess { config -> backupRestored(config); dismiss() }.onFailure { error ->
+                imported = null
+                showFeedback(error.message ?: context.getString(R.string.import_read_failed), true)
+                if (BackupTransaction.requiresRecovery(context.filesDir)) { dismiss(); recoveryRequired() }
             }
+            updateControls()
         }
     }
 
@@ -229,12 +217,9 @@ internal class ConfigImportDialog(
     }
 
     override fun onStop() {
-        if (closed) { super.onStop(); return }
-        closed = true
+        tasks.close { workspace.deleteRecursively() }
         requestId++
         HttpClientCleanup.close(client, listOfNotNull(call))
-        main.removeCallbacksAndMessages(null)
-        worker.execute { workspace.deleteRecursively() }; worker.shutdown()
         super.onStop()
     }
 }

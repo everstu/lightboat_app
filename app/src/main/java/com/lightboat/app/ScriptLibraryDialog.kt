@@ -60,7 +60,7 @@ internal class ScriptLibraryDialog(
 
     private fun edit(script: SharedScript?) {
         showEditor(ScriptEditorDialog(activity, script) { updated ->
-            library = config.copy(scriptLibrary = library).upsertScript(updated).scriptLibrary
+            library = AppConfig.upsertScript(library, updated)
             refresh()
         })
     }
@@ -88,9 +88,7 @@ internal class ScriptLibraryDialog(
     private fun updateEditorLayout() {
         val dialog = editor?.takeIf { it.isShowing } ?: return
         if (dialog is ResponsiveDialog) { dialog.updateLayout(); return }
-        val density = context.resources.displayMetrics.density
-        val width = minOf((600 * density).toInt(), context.resources.displayMetrics.widthPixels - (24 * density).toInt())
-        dialog.window?.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
+        dialog.window?.setLayout(DialogLayout.width(context), WindowManager.LayoutParams.WRAP_CONTENT)
     }
 
     @SuppressLint("NotifyDataSetChanged")
@@ -105,12 +103,8 @@ internal class ScriptLibraryDialog(
     override fun onStart() { super.onStart(); updateLayout() }
     override fun onStop() { editor?.dismiss(); super.onStop() }
     override fun updateLayout() {
-        val density = context.resources.displayMetrics.density
-        val width = minOf((600 * density).toInt(), context.resources.displayMetrics.widthPixels - (24 * density).toInt())
         val maxHeight = (context.resources.displayMetrics.heightPixels * 0.86f).toInt()
-        binding.root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST))
-        window?.setLayout(width, binding.root.measuredHeight)
+        DialogLayout.apply(window, binding.root, DialogLayout.width(context), maxHeight)
         updateEditorLayout()
     }
 

@@ -51,6 +51,8 @@
     <string name="webdav_connected_backup">连接成功，远端已有备份。上传前会确认替换。</string>
     <string name="webdav_connected_empty">连接成功，当前文件夹尚无备份。</string>
     <string name="webdav_checking_remote">正在检查远端版本…</string>
+    <string name="webdav_check_complete">远端检查完成，请确认是否替换备份。</string>
+    <string name="webdav_check_unsupported">远端检查完成：该服务器不支持安全覆盖，无法上传替换。</string>
     <string name="webdav_uploading">正在生成并上传完整备份…</string>
     <string name="webdav_downloading">正在下载并校验备份…</string>
     <string name="webdav_restoring">正在恢复数据，请稍候…</string>
@@ -62,6 +64,8 @@
     <string name="webdav_unknown_time">时间未知</string>
     <string name="webdav_conflict_title">远端已有其他版本</string>
     <string name="webdav_upload_title">替换远端备份</string>
+    <string name="webdav_unsafe_overwrite_title">无法安全覆盖远端备份</string>
+    <string name="webdav_unsafe_overwrite_message">该服务器未提供可用于版本校验的强 ETag，无法安全覆盖已有备份。\n\n远端修改时间：%1$s\n\n请返回后改用“从远端恢复”，或换用空的备份目录。</string>
     <string name="webdav_conflict_message">远端备份与本机上次同步记录不同，可能来自另一台设备。\n\n远端修改时间：%1$s\n\n上传会用本机完整数据替换它；若要使用远端版本，请取消后选择“从远端恢复”。</string>
     <string name="webdav_replace_message">远端修改时间：%1$s\n\n上传将用本机完整数据替换远端备份。两台设备的数据不会自动合并。</string>
     <string name="webdav_replace_remote">确认替换远端</string>

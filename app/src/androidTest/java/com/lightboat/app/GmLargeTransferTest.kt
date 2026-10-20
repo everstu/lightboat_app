@@ -72,6 +72,7 @@ class GmLargeTransferTest {
                 window.readCounter = () => GM_getValue('counter', 0);
             """.trimIndent())
             "/text" -> newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", patternStream(size, false), size.toLong())
+            "/small" -> newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")
             "/binary" -> newFixedLengthResponse(Response.Status.OK, "application/octet-stream", patternStream(size, true), size.toLong())
             "/exact" -> newFixedLengthResponse(Response.Status.OK, "text/plain", patternStream(10 * 1024 * 1024, false), (10 * 1024 * 1024).toLong())
             "/over" -> newChunkedResponse(Response.Status.OK, "text/plain", patternStream(10 * 1024 * 1024 + 1, false))
@@ -177,6 +178,43 @@ class GmLargeTransferTest {
             "$identity:large:lightboat-test:Large GM regression").encoded("counter")!!).getInt("value")
         assertEquals(persisted.toString(), javascript("window.readCounter()"))
         assertEquals(persisted.toString(), javascript("document.getElementById('frame').contentWindow.readCounter()"))
+    }
+
+    @Test fun aMissingChunkAcknowledgementDoesNotPermanentlyDisableTheDocumentTransport() {
+        // Suppress one real response and its ACK without destroying or navigating the page.
+        assertEquals("true", javascript("""
+            (() => {
+              const name = Object.getOwnPropertyNames(window).find(key => /^LightboatGM_[a-f0-9]+$/.test(key));
+              const bridge = name && window[name];
+              if (!bridge || typeof bridge.onmessage !== 'function') return false;
+              const receive = bridge.onmessage;
+              window.dropBridgeChunks = true;
+              window.droppedBridgeChunks = 0;
+              bridge.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                if (window.dropBridgeChunks && message.event === 'bridgeChunk') {
+                  window.droppedBridgeChunks++;
+                  return;
+                }
+                return receive.call(this, event);
+              };
+              window.fetchLimit('/small');
+              return true;
+            })()
+        """.trimIndent()))
+        waitFor("The missing ACK did not time out", "typeof window.limitError==='string'")
+        assertTrue(javascript("window.droppedBridgeChunks>0") == "true")
+        assertTrue(javascript("window.limitError")!!.contains("超时"))
+
+        javascript("window.dropBridgeChunks=false;window.limitError=null;window.limitLength=0;window.fetchLimit('/small');true")
+        waitFor("The next request did not finish", "window.limitLength===2 || typeof window.limitError==='string'")
+        assertEquals("The document transport remained closed: ${javascript("window.limitError")}", "2", javascript("window.limitLength"))
+
+        javascript("const frame=document.createElement('iframe');frame.src='/frame';frame.id='frame';document.body.appendChild(frame);true")
+        waitFor("Child script did not start", "document.getElementById('frame').contentWindow.gmReady===true")
+        javascript("document.getElementById('frame').contentWindow.share();true")
+        waitFor("The child write did not complete", "document.getElementById('frame').contentWindow.sharedSaved===true")
+        assertEquals("Value notifications did not recover", "400000", javascript("window.remoteLength"))
     }
 
     private fun launch() { scenario = ActivityScenario.launch(MainActivity::class.java); waitFor("Script did not start", "window.gmReady===true") }

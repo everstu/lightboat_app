@@ -73,10 +73,8 @@ internal class CategoryRenameDialog(
     }
 
     override fun updateLayout() {
-        val density = context.resources.displayMetrics.density
-        val width = minOf(context.resources.displayMetrics.widthPixels - (32 * density).toInt(), (440 * density).toInt())
         window?.apply {
-            setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
+            setLayout(DialogLayout.width(context, maxWidthDp = 440, marginDp = 32), WindowManager.LayoutParams.WRAP_CONTENT)
             @Suppress("DEPRECATION")
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         }

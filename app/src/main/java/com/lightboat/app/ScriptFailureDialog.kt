@@ -1,7 +1,6 @@
 package com.lightboat.app
 
 import android.os.Bundle
-import android.view.View
 import android.view.Window
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDialog
@@ -39,11 +38,7 @@ internal class ScriptFailureDialog(
 
     override fun onStart() { super.onStart(); updateLayout() }
     override fun updateLayout() {
-        val density = context.resources.displayMetrics.density
-        val width = minOf((560 * density).toInt(), context.resources.displayMetrics.widthPixels - (32 * density).toInt())
-        val height = (context.resources.displayMetrics.heightPixels * 0.86f).toInt()
-        binding.root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.AT_MOST))
-        window?.setLayout(width, binding.root.measuredHeight)
+        val maxHeight = (context.resources.displayMetrics.heightPixels * 0.86f).toInt()
+        DialogLayout.apply(window, binding.root, DialogLayout.width(context, maxWidthDp = 560, marginDp = 32), maxHeight)
     }
 }

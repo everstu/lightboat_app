@@ -96,13 +96,13 @@ internal class ScriptEditorDialog(
         super.onStop()
     }
     override fun updateLayout() {
-        val density = context.resources.displayMetrics.density
-        val width = minOf((600 * density).toInt(), context.resources.displayMetrics.widthPixels - (24 * density).toInt())
         val dialogWindow = window ?: return
         val visible = Rect().also(dialogWindow.decorView::getWindowVisibleDisplayFrame)
+        val width = DialogLayout.width(context)
         // A floating window can consume IME insets before they reach the content.
         // Its visible display frame already excludes the keyboard and system bars.
-        updateSpacing(context.resources.displayMetrics.heightPixels - visible.bottom > 100 * density)
+        updateSpacing(context.resources.displayMetrics.heightPixels - visible.bottom > 100 *
+            context.resources.displayMetrics.density)
         val height = if (compact) visible.height().coerceAtLeast(1) else WindowManager.LayoutParams.WRAP_CONTENT
         if (dialogWindow.attributes.width != width || dialogWindow.attributes.height != height) {
             binding.root.doOnNextLayout {

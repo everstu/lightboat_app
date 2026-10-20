@@ -8,6 +8,23 @@ internal object ScriptLimits {
     const val CHUNK_CHARS = 32 * 1024
 }
 
+/** UTF-8 byte count without materializing the encoded array; used for size guards only. */
+internal fun utf8ByteLength(text: String): Int {
+    var count = 0
+    var index = 0
+    while (index < text.length) {
+        val character = text[index]
+        when {
+            character.code < 0x80 -> count++
+            character.code < 0x800 -> count += 2
+            character.isHighSurrogate() && index + 1 < text.length && text[index + 1].isLowSurrogate() -> { count += 4; index++ }
+            else -> count += 3
+        }
+        index++
+    }
+    return count
+}
+
 internal class LimitedScriptOutput(output: OutputStream, private val limit: Int = ScriptLimits.MAX_BYTES) : FilterOutputStream(output) {
     var count = 0; private set
     override fun write(value: Int) {
