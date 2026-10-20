@@ -57,6 +57,22 @@ class BackupTransactionTest {
         assertFalse(root.resolve("userscript-values/new.json").exists())
     }
 
+    @Test fun failedRecoveryOfACorruptConfigKeepsAnExplicitRecoveryStateInsteadOfAnEmptyPlaceholder() {
+        val root = live()
+        root.resolve("config.invalid.json").writeText("broken original")
+        var fail = true
+        val transaction = BackupTransaction(root) {
+            if (fail) { fail = false; throw IllegalStateException("preferences failed") }
+        }
+        assertThrows(IllegalStateException::class.java) {
+            transaction.install(candidate(), ConfigCodec.encode(AppConfig.EMPTY), oldPrefs, oldConfigRecovery = true)
+        }
+        assertFalse(root.resolve("config.json").exists())
+        assertTrue(root.resolve("config.recovery-required").exists())
+        assertEquals("broken original", root.resolve("config.invalid.json").readText())
+        assertEquals("old values", root.resolve("userscript-values/old.json").readText())
+    }
+
     @Test fun interruptedPendingRestoreIsRecoveredBeforeOpeningAnyProfile() {
         val root = live()
         val journal = root.resolve("webdav-restore-transaction").apply { mkdirs() }

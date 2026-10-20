@@ -9,6 +9,7 @@ import com.lightboat.app.ConfigCodec
 import com.lightboat.app.ConfigStore
 import com.lightboat.app.AppConfig
 import com.lightboat.app.userscript.ScriptStorage
+import com.lightboat.app.userscript.ScriptValueCodec
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.charset.CodingErrorAction
@@ -45,9 +46,11 @@ internal class BackupRepository(context: Context, private val defaultUserAgent: 
         if (options.scriptData) candidate.directory.resolve("userscript-values").listFiles().orEmpty().forEach(::validateStore)
         val transaction = BackupTransaction(root) { writePreferences(app, it) }
         transaction.recover()?.deleteRecursively()
-        val currentConfig = ConfigCodec.encode(ConfigStore(app, defaultUserAgent).load())
+        val currentStore = ConfigStore(app, defaultUserAgent)
+        val currentConfig = ConfigCodec.encode(currentStore.loadForRestore())
         val currentPreferences = readPreferences(app)
-        transaction.install(candidate, currentConfig, currentPreferences, options)?.deleteRecursively()
+        transaction.install(candidate, currentConfig, currentPreferences, options, currentStore.recoveryRequired)?.deleteRecursively()
+        ConfigStore(app, defaultUserAgent).completeRecovery()
         return ConfigStore(app, defaultUserAgent).load()
     }
 
@@ -131,16 +134,7 @@ internal class BackupRepository(context: Context, private val defaultUserAgent: 
                         while (reader.hasNext()) {
                             val key = reader.nextName()
                             require(key.length <= 512 && keys.add(key))
-                            reader.beginObject()
-                            var type: String? = null
-                            val fields = mutableSetOf<String>()
-                            while (reader.hasNext()) {
-                                val field = reader.nextName()
-                                require(fields.add(field))
-                                if (field == "type") type = reader.nextString() else reader.skipValue()
-                            }
-                            reader.endObject()
-                            require(type in setOf("json", "undefined"))
+                            ScriptValueCodec.validate(reader)
                         }
                         reader.endObject(); require(reader.peek() == JsonToken.END_DOCUMENT)
                     }

@@ -531,6 +531,39 @@ class WebDavBackupTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         scenario!!.onActivity { activity -> MainActivity::class.java.getDeclaredMethod("showProfiles").apply { isAccessible = true }.invoke(activity) }
     }
+
+    @Test fun successfulUploadStillReportsSuccessWhenTheLocalCompletionRecordCannotBeSaved() {
+        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(configA())
+        launchManager(); openDialog(); fillServer()
+        scenario!!.onActivity { activity ->
+            val store = WebDavDialog::class.java.getDeclaredField("settingsStore").apply { isAccessible = true }.get(dialog(activity))
+            val field = store.javaClass.getDeclaredField("preferences").apply { isAccessible = true }
+            val preferences = field.get(store) as android.content.SharedPreferences
+            val failing = object : android.content.SharedPreferences by preferences {
+                override fun edit(): android.content.SharedPreferences.Editor {
+                    val editor = preferences.edit()
+                    return object : android.content.SharedPreferences.Editor by editor {
+                        private var completion = false
+                        override fun putString(key: String?, value: String?): android.content.SharedPreferences.Editor {
+                            editor.putString(key, value); return this
+                        }
+                        override fun remove(key: String?): android.content.SharedPreferences.Editor { editor.remove(key); return this }
+                        override fun putLong(key: String?, value: Long): android.content.SharedPreferences.Editor {
+                            if (key == "uploadedAt") completion = true
+                            editor.putLong(key, value); return this
+                        }
+                        override fun commit() = if (completion) false else editor.commit()
+                    }
+                }
+            }
+            field.set(store, failing)
+        }
+        click(R.id.uploadWebdav)
+        waitText("本机同步记录未能保存")
+        assertEquals(1, successfulPuts.get())
+        assertTrue(status().contains("备份上传完成"))
+        assertNotNull(remote)
+    }
     private fun openDialog() = scenario!!.onActivity { it.findViewById<View>(R.id.webDavButton).performClick() }
     private fun closeDialog() = click(R.id.closeWebdav)
     private fun fillServer() = scenario!!.onActivity { activity ->

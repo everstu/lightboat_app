@@ -149,12 +149,15 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
                 val info = repository.create(file, workspace, options)
                 check(!tasks.closed) { "操作已取消" }
                 val result = client.upload(file, expected)
-                settingsStore.accept(result.etag, false)
-                info
+                val recorded = runCatching { settingsStore.accept(result.etag, false) }.onFailure {
+                    DebugLog.event("webdav", "upload completed; local record failed (${it.javaClass.simpleName})")
+                }.isSuccess
+                info to recorded
             } finally { file.delete() }
-        }) { info ->
+        }) { (info, recorded) ->
             pending = null
-            feedback(context.getString(R.string.webdav_upload_success, info.profiles, info.stores))
+            feedback(context.getString(R.string.webdav_upload_success, info.profiles, info.stores) +
+                if (recorded) "" else "\n" + context.getString(R.string.webdav_upload_record_failed))
             showHistory(); updateControls()
             DebugLog.event("webdav", "backup uploaded profiles=${info.profiles} stores=${info.stores}")
         }

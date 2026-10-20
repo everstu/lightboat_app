@@ -12,15 +12,18 @@ function LightboatMatches(meta, address, mainFrame) {
     return glob(pattern, url.href.split('#')[0]);
   };
   const match = pattern => {
-    const parts = /^(\*|http\*|https?|file):\/\/([^/]+)(\/.*)$/.exec(pattern);
+    const parts = /^(\*|http\*|https?):\/\/([^/]+)(\/.*)$/.exec(pattern);
     if (!parts) return false;
     const [, scheme, host, path] = parts;
     if (scheme !== '*' && scheme !== 'http*' && scheme + ':' !== url.protocol) return false;
-    const authority = host.toLowerCase();
+    const authority = /^(\*\.)?(\[[^\]]+\]|[^:]+)(?::([0-9]+))?$/.exec(host);
+    if (!authority) return false;
+    if (authority[3] && Number(authority[3]) !== Number(url.port || (url.protocol === 'https:' ? 443 : 80))) return false;
+    let ruleHost;
+    try { ruleHost = authority[2] === '*' ? '*' : new URL('http://' + authority[2] + '/').hostname.toLowerCase(); }
+    catch (_) { return false; }
     const hostname = url.hostname.toLowerCase();
-    if (authority !== '*' && !(authority.startsWith('*.') &&
-        (hostname === authority.slice(2) || hostname.endsWith('.' + authority.slice(2)))) &&
-        authority !== url.host.toLowerCase() && authority !== hostname) return false;
+    if (ruleHost !== '*' && ruleHost !== hostname && !(authority[1] && hostname.endsWith('.' + ruleHost))) return false;
     return glob(path, url.pathname + url.search);
   };
   const matches = meta.match || [];

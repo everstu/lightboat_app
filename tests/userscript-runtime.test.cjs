@@ -8,6 +8,12 @@ const matcher = fs.readFileSync(path.join(assets, 'userscript-matcher.js'), 'utf
 const runtime = fs.readFileSync(path.join(assets, 'userscript-runtime.js'), 'utf8');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
+test('Shared URL normalization and matching vectors agree with the native matcher', () => {
+  const cases=JSON.parse(fs.readFileSync(path.join(__dirname,'../app/src/test/resources/script-match-cases.json'),'utf8'));
+  const context=vm.createContext({URL});vm.runInContext(matcher,context);
+  for (const item of cases) assert.equal(context.LightboatMatches(item.meta,item.url,true),item.expected,JSON.stringify(item));
+});
+
 function harness(meta = {}, { url = 'https://example.com/page', frame = false, state = 'loading', values = {}, deferWrites = false, streamSnapshot = false,
   timers = { setTimeout, clearTimeout } } = {}) {
   const messages = [], nodes = [], listeners = {}, observers = [];
@@ -47,7 +53,7 @@ function harness(meta = {}, { url = 'https://example.com/page', frame = false, s
     MouseEvent: class { constructor(type) { this.type = type; } },
   });
   vm.runInContext(matcher + '\n' + runtime, context);
-  return { context, spec, messages, nodes, listeners, observers, document,
+  return { context, spec, messages, nodes, listeners, observers, document, bridge,
     run(body) { vm.runInContext(`LightboatRuntime(spec, function(${spec.parameters.join(',')}) {${body}\n});`,
       vm.createContext(Object.assign(context, { spec }))); },
     ready() { document.readyState = 'interactive'; document.body = {}; listeners.DOMContentLoaded?.(); },
@@ -70,7 +76,7 @@ test('Two userscripts use separate bridge handlers, storage snapshots, grants an
     { values: { owner: { type: 'json', value: 'first' } } });
   h.run(`window.firstOwner=GM_getValue('owner');window.firstMenu=GM_registerMenuCommand('Same',()=>window.firstClicked=true);`);
   await flush();
-  const firstHandler = h.context.window.LightboatGM.onmessage;
+  const firstHandler = h.bridge.onmessage;
   const secondMessages = [];
   const secondBridge = { postMessage(text) {
     const msg = JSON.parse(text); secondMessages.push(msg);
@@ -85,7 +91,8 @@ test('Two userscripts use separate bridge handlers, storage snapshots, grants an
   await flush();
   assert.equal(h.context.window.firstOwner, 'first');
   assert.equal(h.context.window.secondOwner, 'second');
-  assert.equal(h.context.window.LightboatGM.onmessage, firstHandler);
+  assert.equal(h.context.window.LightboatGM, undefined);
+  assert.equal(h.bridge.onmessage, firstHandler);
   secondBridge.onmessage({ data: JSON.stringify({ doc: 'frame-1', event: 'menu', menuId: h.context.window.secondMenu }) });
   assert.equal(h.context.window.secondClicked, true);
   assert.equal(h.context.window.firstClicked, undefined);
@@ -253,17 +260,76 @@ test('Earlier remote notifications cannot overwrite a newer pending local write'
   h.run(`window.read=()=>GM_getValue('count');window.write=n=>GM_setValue('count',n);`);
   await flush();
   h.context.window.write(2);
+  await flush();
   const first = h.messages.find(msg => msg.op === 'setValue');
   h.context.window.write(3);
-  const last = h.messages.filter(msg => msg.op === 'setValue').at(-1);
   h.reply({ event: 'value', key: 'count', value: { type: 'json', value: 1 } });
   assert.equal(h.context.window.read(), 3);
   h.reply({ id: first.id, result: null }); await flush();
+  const last = h.messages.filter(msg => msg.op === 'setValue').at(-1);
   h.reply({ event: 'value', key: 'count', value: { type: 'json', value: 2 } });
   assert.equal(h.context.window.read(), 3);
   h.reply({ id: last.id, result: null }); await flush();
   h.reply({ event: 'value', key: 'count', value: { type: 'json', value: 4 } });
   assert.equal(h.context.window.read(), 4);
+});
+
+test('Failed optimistic writes and deletes recover the last confirmed value without losing newer writes', async () => {
+  for (const outcomes of [[false, false], [true, false], [false, true]]) {
+    const h = harness({runAt:'document-start',grant:['GM_getValue','GM.setValue','GM.deleteValue','GM_addValueChangeListener']},
+      {values:{key:{type:'json',value:'saved'}},deferWrites:true});
+    h.run(`window.read=()=>GM_getValue('key','missing'); window.changes=[];
+      GM_addValueChangeListener('key',(...args)=>window.changes.push(args));
+      window.write=n=>GM.setValue('key',n).catch(e=>e.message);
+      window.remove=()=>GM.deleteValue('key').catch(e=>e.message);`);
+    await flush();
+    const a=h.context.window.write('first'), b=h.context.window.write('newest');
+    await flush();
+    const first=h.messages.find(m=>m.op==='setValue');
+    h.reply({id:first.id,...(outcomes[0]?{result:null}:{error:'disk full'})}); await a; await flush();
+    assert.equal(h.context.window.read(),'newest');
+    const last=h.messages.filter(m=>m.op==='setValue').at(-1);
+    h.reply({id:last.id,...(outcomes[1]?{result:null}:{error:'disk full'})}); await b;
+    const expected=outcomes[1]?'newest':outcomes[0]?'first':'saved';
+    assert.equal(h.context.window.read(),expected);
+    const deletion=h.context.window.remove(); await flush();
+    h.reply({id:h.messages.find(m=>m.op==='deleteValue').id,error:'disk full'}); await deletion;
+    assert.equal(h.context.window.read(),expected);
+    assert.equal(h.context.window.changes.at(-1)[2],expected);
+  }
+});
+
+test('Failed local writes reveal a deferred remote value and preserve prototype-shaped keys', async () => {
+  const h=harness({runAt:'document-start',grant:['GM_getValue','GM.setValue']},{deferWrites:true});
+  h.run(`window.read=()=>GM_getValue('__proto__');window.write=()=>GM.setValue('__proto__','local').catch(()=>{});`);
+  await flush(); const writing=h.context.window.write(); await flush();
+  h.reply({event:'value',key:'__proto__',value:{type:'json',value:'remote'}});
+  assert.equal(h.context.window.read(),'local');
+  h.reply({id:h.messages.find(m=>m.op==='setValue').id,error:'write failed'}); await writing;
+  assert.equal(h.context.window.read(),'remote');
+});
+
+test('Native bridge is hidden and page JSON hooks cannot expose its authentication token', async () => {
+  const h=harness({runAt:'document-start',grant:['GM_setClipboard','unsafeWindow']});
+  h.run(`window.copy=()=>GM_setClipboard('hello');window.page=unsafeWindow;`);
+  await flush();
+  assert.equal(h.context.window.LightboatGM,undefined);
+  assert.equal(h.context.window.page,h.context.window);
+  vm.runInContext(`JSON.stringify=()=>{throw Error('page hook');};
+    Object.prototype.toJSON=function(){window.stolen=this.token;return this;};window.copy();`,h.context);
+  await flush();
+  assert.equal(h.context.window.stolen,undefined);
+  assert.equal(h.messages.find(m=>m.op==='clipboard').token,'test-token');
+});
+
+test('Page apply hooks cannot capture GM capabilities while a document waits for its snapshot', async () => {
+  const h=harness({runAt:'document-start',grant:['GM_getValue','GM.setValue']},{streamSnapshot:true});
+  h.run(`window.ready=typeof GM.setValue==='function';window.cached=GM_getValue('cached');`);
+  vm.runInContext(`Function.prototype.apply=function(){window.stolenArguments=arguments[1];throw Error('page hook');};`,h.context);
+  h.reply({id:h.messages.find(m=>m.op==='hello').id,result:{cached:{type:'json',value:42}}});
+  await flush();
+  assert.equal(h.context.window.ready,true);assert.equal(h.context.window.cached,42);
+  assert.equal(h.context.window.stolenArguments,undefined);
 });
 
 test('Grant none exposes info but no privileged APIs; grant list exposes only listed APIs', () => {

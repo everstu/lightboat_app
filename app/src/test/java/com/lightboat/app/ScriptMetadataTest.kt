@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ScriptMetadataTest {
+    @org.junit.Test fun sharedMatchingVectorsAgreeWithBrowserUrlNormalization() {
+        val text = javaClass.getResource("/script-match-cases.json")!!.readText()
+        val cases = org.json.JSONArray(text)
+        for (index in 0 until cases.length()) {
+            val item = cases.getJSONObject(index)
+            val meta = item.getJSONObject("meta")
+            val directives = meta.keys().asSequence().associateWith { key ->
+                val values = meta.getJSONArray(key)
+                (0 until values.length()).map { values.getString(it) }
+            }
+            assertEquals(item.toString(), item.getBoolean("expected"), ScriptMetadata(directives, "").matchesPage(item.getString("url")))
+        }
+    }
     private fun script(lines: String) = "// ==UserScript==\n$lines\n// ==/UserScript==\n(function(){})();"
 
     @Test fun recognizesDefaultIdleAndPlainJavaScriptStart() {

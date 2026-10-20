@@ -180,33 +180,29 @@ class GmLargeTransferTest {
         assertEquals(persisted.toString(), javascript("document.getElementById('frame').contentWindow.readCounter()"))
     }
 
+    @Test fun pagesCannotEnumerateNativeGmBridgesButCapturedApisStillWorkInAllFrames() {
+        assertEquals("false", javascript("Object.getOwnPropertyNames(window).some(k=>/^LightboatGM_[a-f0-9]+$/.test(k))"))
+        javascript("window.fetchLimit('/small');true")
+        waitFor("A captured bridge must still receive native replies", "window.limitLength===2")
+        javascript("const frame=document.createElement('iframe');frame.src='/frame';frame.id='frame';document.body.appendChild(frame);true")
+        waitFor("Child script did not start", "document.getElementById('frame').contentWindow.gmReady===true")
+        assertEquals("false", javascript("Object.getOwnPropertyNames(document.getElementById('frame').contentWindow).some(k=>/^LightboatGM_[a-f0-9]+$/.test(k))"))
+        javascript("window.writeCounter(123);true")
+        waitFor("Private bridge no longer writes GM values", "document.getElementById('frame').contentWindow.readCounter()===123")
+    }
+
     @Test fun aMissingChunkAcknowledgementDoesNotPermanentlyDisableTheDocumentTransport() {
-        // Suppress one real response and its ACK without destroying or navigating the page.
-        assertEquals("true", javascript("""
-            (() => {
-              const name = Object.getOwnPropertyNames(window).find(key => /^LightboatGM_[a-f0-9]+$/.test(key));
-              const bridge = name && window[name];
-              if (!bridge || typeof bridge.onmessage !== 'function') return false;
-              const receive = bridge.onmessage;
-              window.dropBridgeChunks = true;
-              window.droppedBridgeChunks = 0;
-              bridge.onmessage = function(event) {
-                const message = JSON.parse(event.data);
-                if (window.dropBridgeChunks && message.event === 'bridgeChunk') {
-                  window.droppedBridgeChunks++;
-                  return;
-                }
-                return receive.call(this, event);
-              };
-              window.fetchLimit('/small');
-              return true;
-            })()
-        """.trimIndent()))
+        // Keep JS busy past the native ACK deadline. The bridge itself is private.
+        scenario!!.onActivity { activity ->
+            val container = activity.findViewById<FrameLayout>(R.id.webContainer)
+            val view = (0 until container.childCount).map { container.getChildAt(it) }.filterIsInstance<AppWebView>().first()
+            view.evaluateJavascript("window.fetchLimit('/small');const until=performance.now()+17000;while(performance.now()<until){};true", null)
+        }
+        SystemClock.sleep(18000)
         waitFor("The missing ACK did not time out", "typeof window.limitError==='string'")
-        assertTrue(javascript("window.droppedBridgeChunks>0") == "true")
         assertTrue(javascript("window.limitError")!!.contains("超时"))
 
-        javascript("window.dropBridgeChunks=false;window.limitError=null;window.limitLength=0;window.fetchLimit('/small');true")
+        javascript("window.limitError=null;window.limitLength=0;window.fetchLimit('/small');true")
         waitFor("The next request did not finish", "window.limitLength===2 || typeof window.limitError==='string'")
         assertEquals("The document transport remained closed: ${javascript("window.limitError")}", "2", javascript("window.limitLength"))
 

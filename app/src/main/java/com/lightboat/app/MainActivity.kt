@@ -100,6 +100,9 @@ class MainActivity : AppCompatActivity() {
     private var userScriptHost: UserScriptGroup? = null
     private var draftScripts = emptyList<ProfileScript>()
     private var draftScriptLibrary = emptyList<SharedScript>()
+    private var editorDraftId: String? = null
+    private val editorDraftStore by lazy { EditorDraftStore(this) }
+    private var configRecoveryRequired = false
     private lateinit var profileAdapter: ProfileAdapter
     private lateinit var categoryNameInputFilter: CategoryNameInputFilter
     private lateinit var profileDrag: ItemTouchHelper
@@ -246,6 +249,7 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (backupRecoveryBlocked) { finish(); return }
+                if (configRecoveryRequired) { confirmExit(); return }
                 if (fullscreenPlayer.isActive) { fullscreenPlayer.hide(); return }
                 when (screen) {
                     Screen.EDITOR -> showProfiles()
@@ -276,17 +280,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun finishStartup(savedInstanceState: Bundle?) {
         try {
-            com.lightboat.app.backup.BackupRepository.recoverPending(this)?.let { retired -> worker.execute { retired.deleteRecursively() } }
+            com.lightboat.app.backup.BackupRepository.recoverPending(this)?.let { retired -> worker.execute { discardBackupFiles(listOf(retired)) } }
             val abandonedBackups = com.lightboat.app.backup.BackupRepository.abandonedFiles(this)
-            worker.execute { abandonedBackups.forEach { it.deleteRecursively() } }
+            worker.execute { discardBackupFiles(abandonedBackups) }
         } catch (error: Exception) {
             DebugLog.event("webdav", "startup recovery failed type=${error.javaClass.simpleName}")
             blockForBackupRecovery()
             return
         }
         config = try { store.load() } catch (error: Exception) {
-            toast(getString(R.string.config_read_error))
-            AppConfig.EMPTY
+            DebugLog.event("config", "load failed (${error.javaClass.simpleName}); recovery required")
+            configRecoveryRequired = true
+            showConfigRecovery()
+            return
         }
         val categoryId = if (savedInstanceState?.containsKey("profileCategoryFilter") == true)
             savedInstanceState.getString("profileCategoryFilter") else profileUiPreferences.getString("categoryId", null)
@@ -313,12 +319,27 @@ class MainActivity : AppCompatActivity() {
             savedInstanceState.getString("draftScripts")?.let { text ->
                 draftScripts = runCatching { ConfigCodec.decodeReferences(JSONArray(text), draftScriptLibrary) }.getOrDefault(emptyList())
             }
+            savedInstanceState.getString("editorDraftId")?.let { id ->
+                runCatching { editorDraftStore.load(id) }.onSuccess { (library, references) ->
+                    editorDraftId = id; draftScriptLibrary = library; draftScripts = references
+                }.onFailure { toast(getString(R.string.editor_draft_read_error)) }
+            }
             renderDraftScripts()
             binding.userAgentInput.setText(savedInstanceState.getString("draftUserAgent", defaultUserAgent))
             savedInstanceState.getString("draftPlatform")?.let {
                 selectPlatform(BrowserPlatform.parse(it), false)
             }
         } else if (savedInstanceState?.getBoolean("manager") == true) showProfiles() else launchLast()
+    }
+
+    private fun discardBackupFiles(files: List<java.io.File>) {
+        files.forEach { file ->
+            // Activity recreation can overlap an already scheduled cleanup of
+            // the same retired directory. Cleanup must never crash the process.
+            runCatching { file.deleteRecursively() }.onFailure {
+                DebugLog.event("webdav", "temporary backup cleanup deferred (${it.javaClass.simpleName})")
+            }
+        }
     }
 
     private fun launchLast() {
@@ -537,6 +558,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showProfiles() {
+        if (configRecoveryRequired) { showConfigRecovery(); return }
+        editorDraftStore.delete(editorDraftId); editorDraftId = null
         commitProfileOrder()
         cancelDownload()
         scriptLoader.close()
@@ -679,6 +702,7 @@ class MainActivity : AppCompatActivity() {
         if (profile == null && config.profiles.size >= AppConfig.MAX_PROFILES) {
             toast(getString(R.string.profile_limit, AppConfig.MAX_PROFILES)); return
         }
+        editorDraftStore.delete(editorDraftId); editorDraftId = null
         editingId = profile?.id
         showScreen(Screen.EDITOR)
         binding.configTitle.setText(if (profile == null) R.string.setup_title else R.string.edit_profile)
@@ -752,6 +776,7 @@ class MainActivity : AppCompatActivity() {
             toast(error.message.orEmpty()); return
         }
         if (persist(next)) {
+            editorDraftStore.delete(editorDraftId); editorDraftId = null
             hideKeyboard()
             if (openAfterSave) openProfile(next.profiles.first { it.id == profile.id }) else {
                 showProfiles()
@@ -763,6 +788,7 @@ class MainActivity : AppCompatActivity() {
     private fun persist(next: AppConfig): Boolean = try {
         store.save(next)
         config = next
+        configRecoveryRequired = false
         true
     } catch (error: Exception) {
         toast(getString(R.string.operation_error, error.message.orEmpty()))
@@ -980,7 +1006,8 @@ class MainActivity : AppCompatActivity() {
         }
         val cookies = CookieManager.getInstance()
         val network = MediaRequestClient(profile.userAgent,
-            cookies = { cookies.getCookie(it) }, saveCookie = { url, cookie -> cookies.setCookie(url, cookie) })
+            cookies = { cookies.getCookie(it) }, saveCookie = { url, cookie -> cookies.setCookie(url, cookie) },
+            addresses = MediaAddressPolicy(profile.url))
         mediaNetwork = network
         val proxy = MediaRequestProxy(network)
         mediaProxy = proxy
@@ -1268,6 +1295,10 @@ class MainActivity : AppCompatActivity() {
         binding.statusSpinner.visibility = View.GONE
         binding.retryButton.visibility = View.VISIBLE
         binding.editButton.visibility = View.VISIBLE
+        binding.retryButton.setText(R.string.retry)
+        binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchLast() }
+        binding.editButton.setText(R.string.edit_addresses)
+        binding.editButton.setOnClickListener { showProfiles() }
         updatePageProgress(binding.pageProgress.progress, false)
     }
 
@@ -1307,10 +1338,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyRestoredBackup(restoredConfig: AppConfig) {
         config = restoredConfig
+        configRecoveryRequired = false
         profileOrderDirty = false
         rememberProfileFilter(ProfileFilter(profileUiPreferences.getString("categoryId", null),
             profileUiPreferences.getBoolean("favoritesOnly", false)))
         showProfiles()
+    }
+
+    private fun showConfigRecovery() {
+        showError(R.string.config_recovery_title, getString(R.string.config_recovery_message))
+        binding.settingsButton.visibility = View.GONE
+        binding.retryButton.setText(R.string.import_config)
+        binding.retryButton.setOnClickListener { showConfigImport() }
+        binding.editButton.setText(R.string.config_start_over)
+        binding.editButton.setOnClickListener {
+            showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.config_start_over)
+                .setMessage(R.string.config_start_over_message)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.config_start_over) { _, _ -> if (persist(AppConfig.EMPTY)) showProfiles() }
+                .create())
+        }
     }
 
     private fun blockForBackupRecovery() {
@@ -1388,7 +1435,11 @@ class MainActivity : AppCompatActivity() {
         outState.putString("draftUrl", binding.websiteInput.text.toString())
         outState.putString("draftScript", binding.scriptInput.text.toString())
         outState.putString("draftScripts", ConfigCodec.referencesJson(draftScripts).toString())
-        outState.putString("draftScriptLibrary", ConfigCodec.encode(AppConfig.EMPTY.copy(scriptLibrary = draftScriptLibrary)))
+        if (screen == Screen.EDITOR) {
+            runCatching { editorDraftStore.save(editorDraftId, draftScriptLibrary, draftScripts) }
+                .onSuccess { id -> editorDraftId = id; outState.putString("editorDraftId", id) }
+                .onFailure { DebugLog.event("config", "editor draft save failed (${it.javaClass.simpleName})") }
+        }
         outState.putString("draftUserAgent", binding.userAgentInput.text.toString())
         outState.putString("draftPlatform", editingPlatform.configValue)
         outState.putString("scanTarget", scanTarget?.name)

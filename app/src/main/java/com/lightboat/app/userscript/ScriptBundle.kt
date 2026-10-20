@@ -26,15 +26,18 @@ data class ScriptBundle(
     fun initializationCheck(matcher: String, token: String, bridgeName: String): String = """
         (function(){
         $matcher
+        const bridge=window[${JSONObject.quote(bridgeName)}];
+        const send=bridge.postMessage.bind(bridge);
+        const stringify=JSON.stringify.bind(JSON),create=Object.create.bind(Object),assign=Object.assign.bind(Object);
         const marker=${JSONObject.quote(bridgeName + "_initialized")};
         setTimeout(function(){
           const initialized=window[marker]===true;
           delete window[marker];
           if(initialized || !LightboatMatches(${metadata.json()},location.href,window===window.top)) return;
-          try { window[${JSONObject.quote(bridgeName)}].postMessage(JSON.stringify({
+          try { send(stringify(assign(create(null),{
             token:${JSONObject.quote(token)},doc:Date.now()+'-'+Math.random(),url:location.href,
             op:'bootstrapFailed',text:'脚本未能完成初始化，可能存在语法或启动错误。请查看调试日志。'
-          })); } catch (_) {}
+          }))); } catch (_) {}
         },0);
         })();
     """.trimIndent()

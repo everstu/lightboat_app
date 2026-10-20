@@ -1,8 +1,14 @@
 function LightboatRuntime(spec, entry) {
   'use strict';
   const meta = spec.meta;
+  const bridgeName = spec.bridgeName || 'LightboatGM';
+  const bridge = window[bridgeName];
+  const nativePost = bridge.postMessage.bind(bridge);
+  const stringify = JSON.stringify.bind(JSON), parse = JSON.parse.bind(JSON);
+  const create = Object.create.bind(Object), assign = Object.assign.bind(Object);
+  const apply = Reflect.apply.bind(Reflect);
+  if (!delete window[bridgeName] || window[bridgeName] !== undefined) throw new Error('无法保护脚本通信接口，请更新系统 WebView');
   if (!LightboatMatches(meta, location.href, window === window.top)) return;
-  const bridge = window[spec.bridgeName || 'LightboatGM'];
   const doc = (globalThis.crypto?.randomUUID?.() || Date.now() + '-' + Math.random()).toString();
   const pending = new Map();
   const incoming = new Map();
@@ -18,7 +24,7 @@ function LightboatRuntime(spec, entry) {
   const grants = new Set(meta.grant || []);
   const permitted = name => !grants.has('none') && grants.has(name);
   const errorText = error => error?.stack || error?.message || String(error);
-  const post = data => bridge.postMessage(JSON.stringify({ token: spec.token, doc, url: location.href, ...data }));
+  const post = data => nativePost(stringify(assign(create(null), data, { token: spec.token, doc, url: location.href })));
   const report = (level, text) => {
     try { post({ op: 'log', level, text: String(text).slice(0, 8000) }); }
     catch (_) { console.error('[Lightboat]', text); }
@@ -28,7 +34,7 @@ function LightboatRuntime(spec, entry) {
     try { post({ op: 'executionFailed', text: errorText(error).slice(0, 1000) }); } catch (_) {}
   };
   const invoke = (fn, args) => {
-    try { return fn(...args); } catch (error) { report('error', errorText(error)); }
+    try { return apply(fn, undefined, args); } catch (error) { report('error', errorText(error)); }
   };
   const rpc = (op, data = {}, onEvent) => {
     const id = String(++sequence);
@@ -70,7 +76,8 @@ function LightboatRuntime(spec, entry) {
     if (message.event === 'value' || message.event === 'snapshotValue') {
       // Native replies are ordered. Until our newer local writes are acknowledged,
       // an earlier frame notification must not roll back the optimistic snapshot.
-      if (valueWrites.has(message.key)) return;
+      const writing = valueWrites.get(message.key);
+      if (writing) { writing.confirmed = message.deleted ? undefined : message.value; return; }
       if (restoredValues) {
         if (message.deleted) delete restoredValues[message.key]; else restoredValues[message.key] = message.value;
         return;
@@ -123,7 +130,7 @@ function LightboatRuntime(spec, entry) {
   };
   bridge.onmessage = event => {
     let message;
-    try { message = JSON.parse(event.data); } catch (_) { return; }
+    try { message = parse(event.data); } catch (_) { return; }
     if (message.doc !== doc) return;
     if (message.event !== 'bridgeChunk') { receive(message); return; }
     const id = message.transfer;
@@ -143,7 +150,7 @@ function LightboatRuntime(spec, entry) {
       if (message.last) {
         incoming.delete(id); clearTimeout(transfer.timer);
         if (transfer.size !== transfer.total) throw new Error('GM 分片不完整');
-        receive(JSON.parse(transfer.chunks.join('')));
+        receive(parse(transfer.chunks.join('')));
       }
       post({ op: 'chunkAck', transfer: id, index: message.index });
     } catch (error) {
@@ -154,10 +161,13 @@ function LightboatRuntime(spec, entry) {
   const sendDetached = (op, data) => rpc(op, data).promise.catch(error => report('error', errorText(error)));
   const getValue = (key, fallback) => Object.hasOwn ? (Object.hasOwn(values, key) ? decode(values[key]) : fallback) :
     (Object.prototype.hasOwnProperty.call(values, key) ? decode(values[key]) : fallback);
-  let storageQueue = Promise.resolve(), storageQueued = 0;
-  const writeValue = (op, key, data = {}) => {
-    valueWrites.set(key, (valueWrites.get(key) || 0) + 1);
-    const text = op === 'setValue' ? JSON.stringify(data.value) : '';
+  let storageQueue = Promise.resolve();
+  const writeValue = (op, key, previous, data = {}) => {
+    let state = valueWrites.get(key);
+    if (!state) { state = { confirmed: previous, writes: [] }; valueWrites.set(key, state); }
+    const write = { value: op === 'setValue' ? data.value : undefined };
+    state.writes.push(write);
+    const text = op === 'setValue' ? stringify(data.value) : '';
     const send = () => {
       if (text.length <= CHUNK_CHARS) return rpc(op, { key, ...data }).promise;
       if (text.length > MAX_BYTES) return Promise.reject(new Error('每个脚本的 GM 存储不能超过 10 MiB'));
@@ -172,31 +182,36 @@ function LightboatRuntime(spec, entry) {
         }
       })();
     };
-    let request;
-    if (storageQueued || text.length > CHUNK_CHARS) {
-      storageQueued++;
-      request = storageQueue.then(send);
-      storageQueue = request.catch(() => {}).then(() => { storageQueued--; });
-    } else request = send();
-    return request.finally(() => {
-      const remaining = valueWrites.get(key) - 1;
-      if (remaining) valueWrites.set(key, remaining); else valueWrites.delete(key);
-    });
+    const settle = success => {
+      if (success) state.confirmed = write.value;
+      state.writes.shift();
+      if (state.writes.length) return;
+      valueWrites.delete(key);
+      const old = values[key];
+      if (state.confirmed === undefined) delete values[key]; else values[key] = state.confirmed;
+      if (!sameValue(old, state.confirmed)) notifyValue(key, old, state.confirmed, false);
+    };
+    // Native storage is serial too. Settle each write before sending the next;
+    // failed older writes must never replace a newer optimistic value.
+    const request = storageQueue.then(send).then(result => { settle(true); return result; }, error => { settle(false); throw error; });
+    storageQueue = request.catch(() => {});
+    return request;
   };
   const setValue = (key, value, wait) => {
     key = String(key);
     const old = values[key];
     const next = encode(value);
     values[key] = next;
+    const request = writeValue('setValue', key, old, { value: next });
     notifyValue(key, old, next, false);
-    const request = writeValue('setValue', key, { value: next });
     if (wait) return request;
     request.catch(error => report('error', errorText(error)));
   };
   const deleteValue = (key, wait) => {
     key = String(key);
-    const old = values[key]; delete values[key]; notifyValue(key, old, undefined, false);
-    const request = writeValue('deleteValue', key);
+    const old = values[key]; delete values[key];
+    const request = writeValue('deleteValue', key, old);
+    notifyValue(key, old, undefined, false);
     if (wait) return request;
     request.catch(error => report('error', errorText(error)));
   };
@@ -379,7 +394,7 @@ function LightboatRuntime(spec, entry) {
     scheduled = false;
     if (suspended || executed) return;
     executed = true;
-    try { entry.apply(window, args); report('info', meta.name + ' 已执行（' + meta.runAt + '；' + executionContext + '）'); }
+    try { apply(entry, window, args); report('info', meta.name + ' 已执行（' + meta.runAt + '；' + executionContext + '）'); }
     catch (error) { executionFailed(error); }
   };
   const schedule = () => {

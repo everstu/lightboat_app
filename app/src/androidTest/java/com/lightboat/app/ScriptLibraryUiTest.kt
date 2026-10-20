@@ -35,6 +35,56 @@ class ScriptLibraryUiTest {
     }
     @After fun tearDown() { scenario.close(); backup?.let(configFile::writeBytes) ?: configFile.delete() }
 
+    @Test fun maximumLibraryKeepsActivityStateSmallAndRestoresUnsavedChangesAfterRecreation() {
+        val library = (0 until 100).map { index -> SharedScript("large-$index", "Script $index",
+            "https://example.com/$index/" + "x".repeat(8000) + ".js") }
+        scenario.onActivity { activity ->
+            activity.findViewById<View>(R.id.emptyAddButton).performClick()
+            MainActivity::class.java.getDeclaredField("draftScriptLibrary").apply { isAccessible = true }.set(activity, library)
+            MainActivity::class.java.getDeclaredField("draftScripts").apply { isAccessible = true }
+                .set(activity, listOf(ProfileScript("large-99", false)))
+            val state = Bundle()
+            MainActivity::class.java.getDeclaredMethod("onSaveInstanceState", Bundle::class.java).apply { isAccessible = true }.invoke(activity, state)
+            val parcel = android.os.Parcel.obtain()
+            try { parcel.writeBundle(state); assertTrue("Activity state contains the script library", parcel.dataSize() < 100_000) }
+            finally { parcel.recycle() }
+            assertNotNull(state.getString("editorDraftId"))
+            assertFalse(state.containsKey("draftScriptLibrary"))
+        }
+        scenario.recreate()
+        scenario.onActivity { activity ->
+            assertEquals(library, MainActivity::class.java.getDeclaredField("draftScriptLibrary").apply { isAccessible = true }.get(activity))
+            assertEquals(listOf(ProfileScript("large-99", false)), MainActivity::class.java.getDeclaredField("draftScripts").apply { isAccessible = true }.get(activity))
+            activity.findViewById<View>(R.id.cancelButton).performClick()
+        }
+        assertTrue(load().scriptLibrary.isEmpty())
+    }
+
+    @Test fun corruptConfigurationShowsRecoveryActionsInsteadOfAnApparentlyEmptyLibrary() {
+        scenario.close()
+        configFile.writeText("{invalid test config")
+        try {
+            scenario = ActivityScenario.launch(MainActivity::class.java)
+            scenario.onActivity { activity ->
+                assertEquals(context.getString(R.string.config_recovery_title), activity.findViewById<TextView>(R.id.statusTitle).text.toString())
+                assertEquals(context.getString(R.string.import_config), activity.findViewById<TextView>(R.id.retryButton).text.toString())
+                assertEquals(View.GONE, activity.findViewById<View>(R.id.settingsButton).visibility)
+                activity.findViewById<View>(R.id.retryButton).performClick()
+                assertTrue(dialog(activity) is ConfigImportDialog)
+                dialog(activity).dismiss()
+                activity.findViewById<View>(R.id.editButton).performClick()
+                (dialog(activity) as androidx.appcompat.app.AlertDialog).getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+            }
+            instrumentation.waitForIdleSync()
+            assertTrue(load().profiles.isEmpty())
+            assertEquals("{invalid test config", File(context.filesDir, "config.invalid.json").readText())
+            assertFalse(File(context.filesDir, "config.recovery-required").exists())
+        } finally {
+            ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(AppConfig.EMPTY)
+            File(context.filesDir, "config.invalid.json").delete()
+        }
+    }
+
     @Test fun createsSharedScriptsSelectsOrdersDisablesAndRestoresAnUnsavedProfileDraft() {
         openLibrary()
         create("First script", "https://scripts.example/a.js")

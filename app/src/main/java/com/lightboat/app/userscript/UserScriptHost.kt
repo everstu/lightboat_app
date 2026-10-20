@@ -107,7 +107,7 @@ class UserScriptHost(
     }
 
     private val token = UUID.randomUUID().toString()
-    private val bridgeName = "LightboatGM_" + token.replace("-", "")
+    private val bridgeName = "LightboatGM_" + UUID.randomUUID().toString().replace("-", "")
     val consoleSource = "lightboat-userscript-" + UUID.nameUUIDFromBytes(script.id.toByteArray()).toString() + ".js"
     private val metadataIdentity = bundle.metadata.first("namespace") + ":" + bundle.metadata.name
     private val store = ScriptValueStore(activity, profile.id + ":" + script.id + ":" + metadataIdentity,
@@ -325,7 +325,7 @@ class UserScriptHost(
         }
         val (matcher, runtime) = UserScriptAssets.load(activity)
         val source = if (meta.isUserscript) bundle.bootstrap("$matcher\n$runtime", token, script.url, bridgeName, consoleSource)
-            else bundle.source + "\n;\nwindow[${JSONObject.quote(bridgeName + "_initialized")}]=true;\n//# sourceURL=$consoleSource"
+            else "delete window[${JSONObject.quote(bridgeName)}];\n" + bundle.source + "\n;\nwindow[${JSONObject.quote(bridgeName + "_initialized")}]=true;\n//# sourceURL=$consoleSource"
         val installed = mutableListOf<ScriptHandler>()
         try {
             // Chromium can attribute parse errors to the page instead of sourceURL.

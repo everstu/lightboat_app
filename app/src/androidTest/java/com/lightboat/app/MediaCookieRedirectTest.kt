@@ -27,7 +27,8 @@ class MediaCookieRedirectTest {
         }
         server.start()
         val url = "http://127.0.0.1:${server.listeningPort}"
-        val network = MediaRequestClient("Media cookie audit", manager::getCookie, manager::setCookie)
+        val network = MediaRequestClient("Media cookie audit", manager::getCookie, manager::setCookie,
+            MediaAddressPolicy(allowPrivateForTests = true))
         try {
             repeat(10) {
                 manager.setCookie(url, "$cookieName=initial; Path=/; HttpOnly")

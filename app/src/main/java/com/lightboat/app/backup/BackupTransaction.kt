@@ -15,12 +15,13 @@ internal class BackupTransaction(private val root: File, private val writePrefer
     private val marker get() = File(directory, "state.json")
     private val values get() = File(root, "userscript-values")
 
-    fun install(candidate: OpenedBackup, oldConfig: String, oldPreferences: BackupPreferences, options: BackupOptions = candidate.info.options): File? {
+    fun install(candidate: OpenedBackup, oldConfig: String, oldPreferences: BackupPreferences, options: BackupOptions = candidate.info.options,
+        oldConfigRecovery: Boolean = false): File? {
         check(!directory.exists()) { "上一次恢复尚未完成，请重新启动应用" }
         check(directory.mkdirs()) { "无法创建恢复事务目录" }
         atomicWrite(File(directory, "old-config.json"), oldConfig)
         atomicWrite(File(directory, "old-preferences.json"), oldPreferences.json().toString())
-        atomicWrite(marker, JSONObject().put("state", "pending").toString())
+        atomicWrite(marker, JSONObject().put("state", "pending").put("configRecovery", oldConfigRecovery).toString())
         try {
             if (options.scriptData) {
                 check(values.exists() || values.mkdirs()) { "无法准备脚本存储目录" }
@@ -42,7 +43,8 @@ internal class BackupTransaction(private val root: File, private val writePrefer
     fun recover(): File? {
         if (!directory.exists()) return null
         if (marker.exists()) {
-            val state = JSONObject(BackupArchive.readText(marker, 4096)).getString("state")
+            val journal = JSONObject(BackupArchive.readText(marker, 4096))
+            val state = journal.getString("state")
             require(state in setOf("pending", "committed")) { "恢复事务状态损坏" }
             if (state == "pending") {
                 val text = BackupArchive.readText(File(directory, "old-config.json"), 1024 * 1024)
@@ -54,6 +56,15 @@ internal class BackupTransaction(private val root: File, private val writePrefer
                     check(previous.renameTo(values)) { "无法还原脚本数据" }
                 }
                 replaceConfig(text)
+                // EMPTY is only a rollback placeholder when the original config
+                // was unreadable; do not present it as successfully recovered data.
+                if (journal.optBoolean("configRecovery", false)) {
+                    atomicWrite(File(root, "config.recovery-required"), "config.invalid.json")
+                    for (suffix in listOf("", ".bak", ".new")) {
+                        val placeholder = File(root, "config.json$suffix")
+                        check(!placeholder.exists() || placeholder.delete()) { "无法还原配置恢复状态" }
+                    }
+                }
                 writePreferences(prefs)
                 atomicWrite(marker, JSONObject().put("state", "committed").toString())
             }

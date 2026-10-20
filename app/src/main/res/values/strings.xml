@@ -167,6 +167,12 @@
     <string name="loading_page">正在打开应用…</string>
     <string name="preparing_note">准备完成后，网页会自动打开。</string>
     <string name="retry">重试</string>
+    <string name="webdav_upload_record_failed">远端备份已更新，但本机同步记录未能保存。下次上传将重新检查远端版本。</string>
+    <string name="config_recovery_title">需要恢复配置</string>
+    <string name="config_recovery_message">本机配置无法读取，原文件已保留供恢复。请导入有效备份，或重新开始创建配置。脚本数据不会被清除。</string>
+    <string name="config_start_over">重新开始</string>
+    <string name="config_start_over_message">创建空配置并返回配置管理？损坏的配置副本和现有脚本数据会继续保留。</string>
+    <string name="editor_draft_read_error">未能恢复脚本编辑草稿，已载入上次保存的配置。</string>
     <string name="edit_addresses">修改地址</string>
     <string name="unsupported_title">请更新系统 WebView</string>
     <string name="unsupported_message">当前 WebView 不支持页面启动前注入或脚本传递接口。请更新 Android System WebView 或 Chrome 后重新打开应用。</string>

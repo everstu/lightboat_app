@@ -14,6 +14,7 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import okio.BufferedSource
 import okio.ByteString.Companion.encodeUtf8
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** Proxy for direct media element sources only; it never intercepts browser fetch/XHR. */
 internal class MediaRequestProxy(
@@ -46,19 +47,19 @@ internal class MediaRequestProxy(
 
     override fun start() = start(SOCKET_READ_TIMEOUT, true)
     fun close() { closed = true; stop(); workers.shutdownNow() }
-    fun url(remote: String, referer: String): String {
+    fun url(remote: String, referer: String, cookieOrigin: String? = null): String {
         val route = if (URI(remote).path.orEmpty().endsWith(".m3u8", true)) "$baseUrl.m3u8" else baseUrl
-        return "$route?url=${encode(remote)}&ref=${encode(referer)}"
+        return "$route?url=${encode(remote)}&ref=${encode(referer)}${credentialParameters(cookieOrigin)}"
     }
 
-    private fun rewriteLine(line: String, finalUrl: String, referer: String): String =
+    private fun rewriteLine(line: String, finalUrl: String, referer: String, cookieOrigin: String?): String =
         if (line.startsWith('#')) uriAttribute.replace(line) { match ->
-            "URI=\"${routeReference(finalUrl, match.groupValues[1], referer)}\""
-        } else if (line.isBlank()) line else routeReference(finalUrl, line.trim(), referer)
+            "URI=\"${routeReference(finalUrl, match.groupValues[1], referer, cookieOrigin)}\""
+        } else if (line.isBlank()) line else routeReference(finalUrl, line.trim(), referer, cookieOrigin)
 
-    private fun routeReference(base: String, relative: String, referer: String): String {
+    private fun routeReference(base: String, relative: String, referer: String, cookieOrigin: String?): String {
         val resolved = URI(base).resolve(relative).toString()
-        return if (URI(resolved).scheme in setOf("http", "https")) url(resolved, referer) else relative
+        return if (URI(resolved).scheme in setOf("http", "https")) url(resolved, referer, cookieOrigin) else relative
     }
 
     override fun serve(session: IHTTPSession): Response {
@@ -69,6 +70,11 @@ internal class MediaRequestProxy(
         }
         val remote = session.parameters["url"]?.singleOrNull().orEmpty()
         val referer = session.parameters["ref"]?.singleOrNull().orEmpty()
+        val mode = session.parameters["credentials"]?.singleOrNull()
+        val cookieOrigin = if (mode == "same-origin") session.parameters["origin"]?.singleOrNull() else null
+        if (mode != null && (mode != "same-origin" || cookieOrigin?.toHttpUrlOrNull() == null)) {
+            return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Invalid media credentials mode")
+        }
         val uri = runCatching { URI(remote) }.getOrNull()
         val host = uri?.host?.lowercase()?.removeSurrounding("[", "]")
         if (remote.length > 8192 || uri?.scheme !in setOf("http", "https") || host == null || uri?.rawUserInfo != null ||
@@ -78,7 +84,7 @@ internal class MediaRequestProxy(
         val remoteUri = requireNotNull(uri)
         return try {
             val headers = linkedMapOf<String, String>()
-            listOf("range", "if-range", "if-none-match", "if-modified-since", "accept", "accept-language", "authorization").forEach {
+            listOf("range", "if-range", "if-none-match", "if-modified-since", "accept", "accept-language").forEach {
                 session.headers[it]?.let { value -> headers[it] = value }
             }
             // Rewritten manifests are a new representation: upstream byte
@@ -90,8 +96,9 @@ internal class MediaRequestProxy(
                 headers["Referer"] = referer
             }
             session.headers["origin"]?.takeIf { it != "null" && !it.startsWith("http://127.0.0.1:") }?.let { headers["Origin"] = it }
+            if ("Origin" !in headers && cookieOrigin != null) headers["Origin"] = cookieOrigin
             DebugLog.event("media-proxy", "${session.method.name} playerUA=${session.headers["user-agent"].orEmpty().take(300)} url=${DebugLog.safeUrl(remote)}")
-            val initial = network.execute(remote, session.method.name, headers)
+            val initial = network.execute(remote, session.method.name, headers, cookieOrigin)
             val manifestResource = try { session.uri == "/$token/media.m3u8" || isPlaylist(initial, remoteUri) } catch (error: Exception) {
                 initial.close()
                 throw error
@@ -102,7 +109,7 @@ internal class MediaRequestProxy(
                 initial.close()
                 stripManifestValidators(headers)
                 DebugLog.event("media-manifest", "retry full manifest url=${DebugLog.safeUrl(remote)}")
-                network.execute(remote, session.method.name, headers)
+                network.execute(remote, session.method.name, headers, cookieOrigin)
             } else initial
             try {
                 val status = object : Response.IStatus {
@@ -110,6 +117,7 @@ internal class MediaRequestProxy(
                     override fun getDescription() = "${upstream.code} ${upstream.message.ifBlank { "Response" }}"
                 }
                 val mime = upstream.header("Content-Type").orEmpty().substringBefore(';').ifBlank { "application/octet-stream" }
+                require(isMediaType(mime)) { "Upstream is not a media resource" }
                 val body = upstream.body
                 val manifest = session.method == Method.GET && manifestResource
                 if (manifestResource) require(upstream.code !in setOf(206, 304)) { "Upstream did not return a complete HLS manifest" }
@@ -122,9 +130,9 @@ internal class MediaRequestProxy(
                         override fun getRequestStatus() = 302
                         override fun getDescription() = "302 Found"
                     }, "text/plain", "").apply {
-                        addHeader("Location", "$baseUrl.m3u8?url=${encode(remote)}&ref=${encode(referer)}")
+                        addHeader("Location", "$baseUrl.m3u8?url=${encode(remote)}&ref=${encode(referer)}${credentialParameters(cookieOrigin)}")
                         addHeader("Cache-Control", "no-store")
-                    })
+                    }, upstream)
                 }
                 val result = when {
                     session.method == Method.HEAD -> {
@@ -140,7 +148,7 @@ internal class MediaRequestProxy(
                     playlist -> {
                         val source = requireNotNull(body) { "Empty playlist response" }.source()
                         val stream = HlsPlaylistStream(source,
-                            { line -> rewriteLine(line, upstream.request.url.toString(), referer) }, { upstream.close() })
+                            { line -> rewriteLine(line, upstream.request.url.toString(), referer, cookieOrigin) }, { upstream.close() })
                         DebugLog.event("media-manifest", "HLS accepted url=${DebugLog.safeUrl(upstream.request.url.toString())}")
                         newChunkedResponse(Response.Status.OK, "application/vnd.apple.mpegurl", stream)
                     }
@@ -152,13 +160,13 @@ internal class MediaRequestProxy(
                     }
                 }
                 val blocked = mutableSetOf("content-length", "content-type", "transfer-encoding", "connection",
-                    "set-cookie", "location", "content-security-policy", "access-control-allow-origin", "access-control-allow-credentials")
+                    "set-cookie", "location", "content-security-policy", "x-content-type-options")
                 // OkHttp removes Content-Encoding when it decompresses. Any
                 // remaining encoding belongs to the unchanged media bytes.
                 if (manifestResource) blocked += setOf("etag", "last-modified", "cache-control", "expires", "pragma", "content-range", "content-encoding")
-                upstream.headers.forEach { (name, value) -> if (name.lowercase() !in blocked) result.addHeader(name, value) }
+                upstream.headers.forEach { (name, value) -> if (name.lowercase() !in blocked && !name.startsWith("access-control-", true)) result.addHeader(name, value) }
                 if (manifestResource) result.addHeader("Cache-Control", "no-store")
-                cors(session, result)
+                cors(session, result, upstream)
             } catch (error: Exception) { upstream.close(); throw error }
         } catch (error: Exception) {
             DebugLog.event("media-error", "${error.javaClass.simpleName}: ${error.message.orEmpty()} url=${DebugLog.safeUrl(remote)}")
@@ -169,20 +177,42 @@ internal class MediaRequestProxy(
         }
     }
 
-    private fun cors(session: IHTTPSession, result: Response): Response {
+    private fun cors(session: IHTTPSession, result: Response, upstream: okhttp3.Response? = null): Response {
         val origin = session.headers["origin"]?.takeIf { it != "null" }
-        result.addHeader("Access-Control-Allow-Origin", origin ?: "*")
-        if (origin != null) result.addHeader("Access-Control-Allow-Credentials", "true")
-        result.addHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
-        result.addHeader("Access-Control-Allow-Headers", "Range, If-Range, If-None-Match, If-Modified-Since, Authorization")
-        result.addHeader("Access-Control-Allow-Private-Network", "true")
-        result.addHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges")
+        val source = upstream?.request?.url ?: session.parameters["url"]?.singleOrNull()?.toHttpUrlOrNull()
+        val caller = origin?.toHttpUrlOrNull()
+        val sameOrigin = caller != null && source != null && caller.scheme == source.scheme && caller.host == source.host && caller.port == source.port
+        val allowed = upstream?.header("Access-Control-Allow-Origin")
+        val credentialed = upstream != null && network.usedCredentials(upstream)
+        val credentialsAllowed = upstream?.header("Access-Control-Allow-Credentials") == "true"
+        // Local routing must not grant read access the original server did not grant.
+        if (origin != null && (sameOrigin || allowed == origin && (!credentialed || credentialsAllowed) || allowed == "*" && !credentialed)) {
+            result.addHeader("Access-Control-Allow-Origin", if (!sameOrigin && allowed == "*") "*" else origin)
+            if (sameOrigin || allowed == origin && credentialsAllowed) {
+                result.addHeader("Access-Control-Allow-Credentials", "true")
+            }
+            result.addHeader("Vary", "Origin")
+            result.addHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+            result.addHeader("Access-Control-Allow-Headers", "Range, If-Range, If-None-Match, If-Modified-Since")
+            result.addHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges")
+        }
+        result.addHeader("Content-Security-Policy", "sandbox; default-src 'none'")
+        result.addHeader("X-Content-Type-Options", "nosniff")
         // Do not occupy a streaming worker waiting for an idle loopback keepalive.
         result.addHeader("Connection", "close")
         return result
     }
 
+    private fun isMediaType(value: String): Boolean {
+        val mime = value.trim().lowercase()
+        return mime.startsWith("video/") || mime.startsWith("audio/") || mime in setOf(
+            "application/octet-stream", "binary/octet-stream", "application/vnd.apple.mpegurl", "application/x-mpegurl",
+            "application/mp4", "application/dash+xml", "application/vnd.ms-sstr+xml", "application/ogg", "application/x-mpeg",
+            "application/binary", "application/x-binary", "text/plain")
+    }
+
     private fun encode(value: String) = URLEncoder.encode(value, "UTF-8")
+    private fun credentialParameters(origin: String?) = origin?.let { "&credentials=same-origin&origin=${encode(it)}" }.orEmpty()
 
     private fun stripManifestValidators(headers: MutableMap<String, String>) {
         listOf("range", "if-range", "if-none-match", "if-modified-since").forEach { headers.remove(it) }
