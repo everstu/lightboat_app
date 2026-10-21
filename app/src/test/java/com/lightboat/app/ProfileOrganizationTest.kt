@@ -170,4 +170,32 @@ class ProfileOrganizationTest {
         assertEquals(grouped.profiles, latin.renameCategory("unused", "已归档").profiles)
         assertEquals(mapOf("work" to "工作", "play" to "娱乐"), grouped.categories)
     }
+
+    @Test fun notesSurviveFavoritesCategoriesReorderingTopAndScriptLibraryChanges() {
+        val notes = grouped.profiles.associate { it.id to "备注 ${it.id}\n\t缩进 😀" }
+        val noted = grouped.copy(profiles = grouped.profiles.map { it.copy(note = notes.getValue(it.id)) })
+
+        val favorited = noted.toggleFavorite("b")
+        assertEquals(notes.getValue("b"), favorited.profiles.first { it.id == "b" }.note)
+
+        val categorized = favorited.upsert(favorited.profiles.first(), "新分类")
+        assertEquals(notes.getValue("a"), categorized.profiles.first().note)
+
+        val reordered = categorized.reorder(listOf("e", "d", "c", "b", "a"))
+        assertEquals(listOf("e", "d", "c", "b", "a").map { notes.getValue(it) }, reordered.profiles.map { it.note })
+
+        val top = reordered.moveToTop("c")
+        assertEquals(notes.getValue("c"), top.profiles.first().note)
+        assertEquals(reordered.lastProfileId, top.lastProfileId)
+
+        val withScript = top.upsertScript(SharedScript("shared", "脚本", "https://scripts.example/a.js"))
+        assertTrue(withScript.profiles.all { it.note == notes.getValue(it.id) })
+        val cleared = withScript.replaceScriptLibrary(emptyList())
+        assertTrue(cleared.profiles.all { it.note == notes.getValue(it.id) })
+
+        val roundTripped = ConfigCodec.decode(ConfigCodec.encode(cleared))
+        assertEquals(cleared.profiles.associate { it.id to it.note }, roundTripped.profiles.associate { it.id to it.note })
+        val removed = roundTripped.remove("b")
+        assertTrue(removed.profiles.all { it.note == notes.getValue(it.id) })
+    }
 }

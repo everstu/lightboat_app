@@ -13,7 +13,8 @@ class ProfileAdapter(
     private val edit: (Profile) -> Unit,
     private val delete: (Profile) -> Unit,
     private val favorite: (Profile) -> Unit,
-    private val moveToTop: (Profile) -> Unit
+    private val moveToTop: (Profile) -> Unit,
+    private val showNote: (Profile) -> Unit
 ) : RecyclerView.Adapter<ProfileAdapter.Holder>() {
     class Holder(val binding: ItemProfileBinding) : RecyclerView.ViewHolder(binding.root)
     private val profiles = mutableListOf<Profile>()
@@ -80,6 +81,7 @@ class ProfileAdapter(
         row.editProfile.setOnClickListener { edit(profile) }
         row.profileMore.setOnClickListener {
             PopupMenu(context, row.profileMore).apply {
+                menu.add(R.string.view_note).setOnMenuItemClickListener { showNote(profile); true }
                 menu.add(R.string.delete).setOnMenuItemClickListener { delete(profile); true }
             }.show()
         }

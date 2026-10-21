@@ -281,6 +281,17 @@
     <string name="profile_basics">基本信息</string>
     <string name="profile_access">访问方式</string>
     <string name="profile_ua_hint">可按需修改，通常保持平台默认值即可。</string>
+    <string name="profile_note_label">配置备注（可选）</string>
+    <string name="profile_note_hint">填写说明、登录方式或注意事项</string>
+    <string name="profile_note_help">纯文本保存，支持换行、缩进和 emoji；最多 2000 个字符。</string>
+    <string name="profile_note_length">%1$d / %2$d 个字符</string>
+    <string name="profile_note_limit_reached">已达 %1$d 个字符上限</string>
+    <string name="profile_note_title">配置备注</string>
+    <string name="profile_note_dialog_profile">配置 · %1$s</string>
+    <string name="profile_note_empty">暂无备注</string>
+    <string name="profile_note_copied">备注已复制</string>
+    <string name="view_note">查看备注</string>
+    <string name="copy_all">复制全部</string>
     <string name="profile_close_editor">返回配置管理</string>
     <string name="import_description">从在线链接或本地文件恢复备份，兼容旧版 JSON 配置。</string>
     <string name="import_source_url">在线链接</string>

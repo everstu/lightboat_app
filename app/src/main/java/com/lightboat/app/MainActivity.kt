@@ -225,6 +225,12 @@ class MainActivity : AppCompatActivity() {
             binding.categoryInput.error = null
         }
         binding.clearCategory.setOnClickListener { binding.categoryInput.text?.clear() }
+        binding.noteInput.filters = arrayOf(InputFilter.LengthFilter(AppConfig.MAX_PROFILE_NOTE_LENGTH))
+        binding.noteInput.doAfterTextChanged {
+            binding.noteInput.error = null
+            updateNoteCounter()
+        }
+        updateNoteCounter()
         binding.chooseCategory.setOnClickListener {
             val text = binding.categoryInput.text.toString().trim()
             val selectedId = if (text.isEmpty()) null else config.categories.entries
@@ -334,6 +340,8 @@ class MainActivity : AppCompatActivity() {
             savedInstanceState.getString("draftPlatform")?.let {
                 selectPlatform(BrowserPlatform.parse(it), false)
             }
+            savedInstanceState.getString("draftNote")?.let { binding.noteInput.setText(it) }
+            updateNoteCounter()
         } else if (savedInstanceState?.getBoolean("manager") == true) showProfiles() else launchLast()
     }
 
@@ -629,7 +637,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupProfileList() {
-        profileAdapter = ProfileAdapter(::openProfile, ::showEditor, ::confirmDeleteProfile, ::toggleProfileFavorite, ::moveProfileToTop)
+        profileAdapter = ProfileAdapter(::openProfile, ::showEditor, ::confirmDeleteProfile, ::toggleProfileFavorite,
+            ::moveProfileToTop, ::showProfileNote)
         binding.profilesList.layoutManager = LinearLayoutManager(this)
         binding.profilesList.setHasFixedSize(true)
         binding.profilesList.adapter = profileAdapter
@@ -703,6 +712,15 @@ class MainActivity : AppCompatActivity() {
             }.create())
     }
 
+    private fun showProfileNote(profile: Profile) {
+        hideKeyboard()
+        showNativeDialog(ProfileNoteDialog(this, profile.name, profile.note) { note ->
+            (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager)
+                .setPrimaryClip(ClipData.newPlainText(getString(R.string.profile_note_title), note))
+            if (Build.VERSION.SDK_INT < 33) toast(getString(R.string.profile_note_copied))
+        })
+    }
+
     private fun showEditor(profile: Profile?) {
         if (profile == null && config.profiles.size >= AppConfig.MAX_PROFILES) {
             toast(getString(R.string.profile_limit, AppConfig.MAX_PROFILES)); return
@@ -724,6 +742,8 @@ class MainActivity : AppCompatActivity() {
         renderDraftScripts()
         binding.userAgentInput.setText(profile?.userAgent ?: defaultUserAgent)
         selectPlatform(profile?.platform ?: BrowserPlatform.ANDROID, false)
+        binding.noteInput.setText(profile?.note.orEmpty())
+        binding.noteInput.error = null
         binding.nameInput.error = null
         binding.websiteInput.error = null
         binding.scriptInput.error = null
@@ -733,6 +753,19 @@ class MainActivity : AppCompatActivity() {
         binding.cancelButton.visibility = View.VISIBLE
         binding.configPanel.clearFocus()
         binding.editorScroll.post { binding.editorScroll.scrollTo(0, 0) }
+        updateNoteCounter()
+    }
+
+    private fun updateNoteCounter() {
+        if (!::binding.isInitialized) return
+        val length = binding.noteInput.length()
+        val limit = AppConfig.MAX_PROFILE_NOTE_LENGTH
+        val reached = length >= limit
+        binding.noteCounter.setText(
+            if (reached) getString(R.string.profile_note_limit_reached, limit)
+            else getString(R.string.profile_note_length, length, limit)
+        )
+        binding.noteCounter.setTextColor(getColor(if (reached) R.color.accent else R.color.muted))
     }
 
     private fun selectPlatform(platform: BrowserPlatform, updateUserAgent: Boolean) {
@@ -772,9 +805,21 @@ class MainActivity : AppCompatActivity() {
             binding.categoryInput.error = getString(R.string.category_name_too_wide)
             binding.categoryInput.requestFocus(); return
         }
+        val note = try { AppConfig.normalizeProfileNote(binding.noteInput.text.toString()) } catch (error: IllegalArgumentException) {
+            binding.noteInput.error = error.message; binding.noteInput.requestFocus(); return
+        }
         val previous = config.profiles.firstOrNull { it.id == editingId }
-        val profile = Profile(editingId ?: UUID.randomUUID().toString(), name, url, draftScripts, userAgent, editingPlatform,
-            previous?.categoryId, binding.favoriteInput.isChecked)
+        val profile = Profile(
+            id = editingId ?: UUID.randomUUID().toString(),
+            name = name,
+            url = url,
+            scripts = draftScripts,
+            userAgent = userAgent,
+            platform = editingPlatform,
+            categoryId = previous?.categoryId,
+            favorite = binding.favoriteInput.isChecked,
+            note = note,
+        )
         val next = try {
             config.replaceScriptLibrary(draftScriptLibrary).upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
         } catch (error: Exception) {
@@ -1526,6 +1571,7 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("draftFavorite", binding.favoriteInput.isChecked)
         outState.putString("draftUrl", binding.websiteInput.text.toString())
         outState.putString("draftScript", binding.scriptInput.text.toString())
+        outState.putString("draftNote", binding.noteInput.text.toString())
         outState.putString("draftScripts", ConfigCodec.referencesJson(draftScripts).toString())
         if (screen == Screen.EDITOR) {
             runCatching { editorDraftStore.save(editorDraftId, draftScriptLibrary, draftScripts) }

@@ -14,7 +14,8 @@ data class Profile(
     val userAgent: String = AppConfig.DEFAULT_USER_AGENT,
     val platform: BrowserPlatform = MobileUserAgent.detect(userAgent),
     val categoryId: String? = null,
-    val favorite: Boolean = false
+    val favorite: Boolean = false,
+    val note: String = ""
 )
 
 data class AppConfig(
@@ -124,10 +125,26 @@ data class AppConfig(
         const val MAX_CATEGORY_NAME = 60
         const val MAX_PROFILE_SCRIPTS = 16
         const val MAX_LIBRARY_SCRIPTS = 100
+        const val MAX_PROFILE_NOTE_LENGTH = 2000
         val EMPTY = AppConfig(null, emptyList())
         // Fallback for platform-independent decoding; new profiles use the device's mobile UA.
         const val DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Pixel 8) " +
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+        /**
+         * Notes are plain text: line feeds, carriage returns and tabs are allowed,
+         * other ISO control characters are not. Whitespace-only notes become empty,
+         * while meaningful text keeps its exact leading/trailing whitespace.
+         */
+        fun normalizeProfileNote(value: String): String {
+            require(value.length <= MAX_PROFILE_NOTE_LENGTH) {
+                "配置备注最多 $MAX_PROFILE_NOTE_LENGTH 个字符"
+            }
+            require(value.none { Character.isISOControl(it) && it != '\n' && it != '\r' && it != '\t' }) {
+                "配置备注不能包含换行、回车和制表符以外的控制字符"
+            }
+            return if (value.isBlank()) "" else value
+        }
 
         fun normalizeCategoryName(value: String): String {
             val name = value.trim()

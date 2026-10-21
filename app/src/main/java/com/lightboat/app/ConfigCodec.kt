@@ -73,8 +73,12 @@ object ConfigCodec {
                 require(value is Boolean) { "favorite 必须是布尔值" }
                 value
             }
+            val note = if (!item.has("note") || item.isNull("note")) "" else item.get("note").let {
+                require(it is String) { "配置备注必须是字符串" }
+                AppConfig.normalizeProfileNote(it)
+            }
             Profile(id, name, AppConfig.normalizeUrl(item.getString("url")),
-                references, userAgent, platform, categoryId, favorite)
+                references, userAgent, platform, categoryId, favorite, note)
         }
         require(profiles.map { it.id }.distinct().size == profiles.size) { "配置 ID 不能重复" }
         require(root.has("lastProfileId")) { "缺少 lastProfileId" }
@@ -103,6 +107,7 @@ object ConfigCodec {
                     put("platform", profile.platform.configValue)
                     put("categoryId", profile.categoryId ?: JSONObject.NULL)
                     put("favorite", profile.favorite)
+                    put("note", AppConfig.normalizeProfileNote(profile.note))
                 })
             }
         })

@@ -144,6 +144,17 @@
                         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:layout_marginTop="10dp" android:text="@string/profile_ua_hint" android:textSize="12sp" android:textColor="@color/muted" />
                     </LinearLayout>
+                    <TextView style="@style/FieldLabel" android:layout_marginTop="28dp" android:layout_marginBottom="12dp"
+                        android:text="@string/profile_note_label" android:labelFor="@id/noteInput" />
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="16dp">
+                        <EditText android:id="@+id/noteInput" style="@style/NoteField" android:layout_marginTop="0dp"
+                            android:hint="@string/profile_note_hint" />
+                        <TextView android:id="@+id/noteCounter" android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp" android:textColor="@color/muted" android:textSize="12sp" />
+                        <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp" android:text="@string/profile_note_help" android:textColor="@color/muted" android:textSize="12sp" />
+                    </LinearLayout>
                 </LinearLayout>
             </ScrollView>
             <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/line" />

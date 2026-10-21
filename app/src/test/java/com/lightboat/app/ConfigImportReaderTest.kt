@@ -5,6 +5,7 @@ import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -72,5 +73,20 @@ class ConfigImportReaderTest {
             val error = assertThrows(IllegalArgumentException::class.java) { ConfigImportReader.fromUrl(call, userAgent) }
             assertTrue(error.message.orEmpty().contains("1 MiB"))
         }
+    }
+
+    @Test fun profileNotesSurviveImportAndOverlongNotesFailInsteadOfBeingTruncated() {
+        val note = "导入备注 😀\n第二行\t缩进   "
+        val noted = config.copy(profiles = config.profiles.map { it.copy(note = note) })
+        val imported = ConfigImportReader.fromStream(ConfigCodec.encode(noted).byteInputStream(), userAgent)
+        assertEquals(note, imported.profiles.single().note)
+
+        val root = JSONObject(ConfigCodec.encode(noted))
+        root.getJSONArray("profiles").getJSONObject(0)
+            .put("note", "x".repeat(AppConfig.MAX_PROFILE_NOTE_LENGTH + 1))
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            ConfigImportReader.fromStream(root.toString().byteInputStream(), userAgent)
+        }
+        assertTrue(error.message.orEmpty().contains(AppConfig.MAX_PROFILE_NOTE_LENGTH.toString()))
     }
 }

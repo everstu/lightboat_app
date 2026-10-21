@@ -16,10 +16,11 @@ import java.util.zip.ZipOutputStream
 class BackupArchiveTest {
     @get:Rule val temporary = TemporaryFolder()
     private val hashName = "a".repeat(64) + ".json"
+    private val note = "备份备注 😀\n第二行\t缩进   \r\n<b>文本</b>"
     private val config = AppConfig.EMPTY.upsertScript(SharedScript("script-id", "共享脚本", "https://scripts.example/no-ad.js"))
         .copy(categories = mapOf("category-id" to "阅读"))
         .upsert(Profile("profile-id", "日常", "https://page.example/", listOf(ProfileScript("script-id", false)),
-            categoryId = "category-id", favorite = true))
+            categoryId = "category-id", favorite = true, note = note))
     private val prefs = BackupPreferences("category-id", true)
 
     private fun payload(): File = temporary.newFolder().apply {
@@ -34,6 +35,7 @@ class BackupArchiveTest {
         val zip = archive()
         val result = BackupArchive.open(zip, File(temporary.root, "restored")) { file -> JSONObject(file.readText()) }
         assertEquals(config, result.config)
+        assertEquals(note, result.config.profiles.single().note)
         assertEquals(prefs, result.preferences)
         assertEquals(1, result.info.profiles); assertEquals(1, result.info.scripts); assertEquals(1, result.info.stores)
         assertTrue(result.directory.resolve("userscript-values/$hashName").readText().contains("规则"))
