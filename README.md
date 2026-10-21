@@ -118,6 +118,8 @@ Windows 预设在 WebView 支持原生 UA-CH metadata 时保留原生 `navigator
 
 目标页面返回 403、429、5xx 等 HTTP 响应时，保留并展示服务器的原始页面，验证表单、脚本、Cookie 和后续跳转继续由浏览器处理。可在页面中完成网站要求的验证；这不保证网站一定放行。真正的连接失败、证书错误或渲染进程退出仍显示应用错误和重试入口。脚本地址本身的 HTTP 失败不会被当作可执行脚本，用户可选择跳过失败项后继续访问。
 
+主框架收到跳转次数过多（`ERROR_REDIRECT_LOOP`）时，错误页在 **重试** 之外增加 **清除网页缓存并重试**，并保留原始错误描述、**修改地址** 和 **调试日志**。该入口只由当前主框架的重定向循环错误触发；断网、证书错误、脚本准备失败、渲染进程退出、配置恢复页以及 iframe/子资源错误都不显示。点击一次只执行一次清理并重新准备脚本、打开同一配置，不自动恢复，也不会在再次失败后自行重试；清理调用抛错时显示可重试错误，该错误页的 **重试** 会再次执行清理后打开，不记录为清理成功。清理调用 `WebView.clearCache(true)`，范围是应用内所有 WebView 共享的资源缓存（含磁盘），也就是本应用所有配置和站点，不能描述为只清理当前站点或当前配置。Cookie、localStorage、IndexedDB、脚本 GM 数据、配置、备份和 WebDAV 设置都会保留；普通浏览继续使用 `LOAD_DEFAULT` 和 Chromium 默认缓存。该功能不承诺修复网站存储或服务器规则造成的重定向循环。
+
 每次打开配置都会创建新页面并重新准备所有启用脚本；页面资源是否命中缓存由浏览器与服务器决定。渲染与网页网络调度使用 WebView 默认策略，媒体代理的连接仅在当前配置会话内使用。注入顺序指注册顺序，各脚本仍遵循自身 `@match`、`@run-at`、`@noframes`；等待 GM 同步读取快照、不同运行时机及脚本内部异步操作可能改变实际执行先后，需要严格依赖时应由脚本自行协调。
 
 加载页使用脚本 URL 的 HTTP(S) origin，因此直接地址的请求是同源。跨域重定向必须满足浏览器的 CORS 规则；最好填写最终 JS 文件地址。每个脚本最大 1 MiB，每个下载超时 30 秒，本配置已准备的脚本、依赖文本及资源 JSON 编码合计最多 16 MiB；拒绝空脚本、HTML、非成功响应。失败时等待用户决定是否跳过，未经选择不会自动打开目标网页。
@@ -185,6 +187,8 @@ node --test tests/userscript-runtime.test.cjs
 Android 编译、Lint、Kotlin 测试由 GitHub Actions 执行。真机验收重点：
 
 真实 WebView 回归用例为 `app/src/androidTest/java/com/lightboat/app/VisibleNavigationTest.kt`，使用本机 HTTP 服务复现慢响应、403 验证页及断网，检查提前注入、Cookie 和验证后跳转。构建 `assembleDebug assembleDebugAndroidTest` 并安装两个 APK 到测试模拟器后，可运行 `adb -s <测试设备ID> shell am instrument -w -e class com.lightboat.app.VisibleNavigationTest com.lightboat.app.test/androidx.test.runner.AndroidJUnitRunner`；这些设备测试不在普通 Actions 中自动运行。
+
+重定向循环缓存恢复用例为 `app/src/androidTest/java/com/lightboat/app/WebViewCacheRecoveryTest.kt`。它用带 `Cache-Control: public, max-age=3600` 的本机 301 跳转确认缓存循环，验证失败 WebView 销毁后恢复入口仍可用、清理是应用范围（第二个 origin 的资源也被清除）、Cookie/localStorage/IndexedDB/GM 数据和配置保留，并覆盖持续服务端循环不自动重试、切换配置与脚本失败后重试或跳过不丢失/不重复清理，以及断网、证书、iframe、脚本和配置恢复页不显示该入口。运行 `adb -s <测试设备ID> shell am instrument -w -e class com.lightboat.app.WebViewCacheRecoveryTest com.lightboat.app.test/androidx.test.runner.AndroidJUnitRunner`。不同 Chromium 版本对错误跳转的缓存处理可能不同；如果本机夹具无法稳定复现，设备测试会直接失败而不是伪造错误回调。
 
 1. 空配置提示添加；添加第一组后重开直接打开。
 2. 切换到第二组，重开仍打开第二组；编辑、JSON 导入导出、删除项均正常。

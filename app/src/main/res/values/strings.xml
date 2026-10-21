@@ -167,6 +167,10 @@
     <string name="loading_page">正在打开应用…</string>
     <string name="preparing_note">准备完成后，网页会自动打开。</string>
     <string name="retry">重试</string>
+    <string name="clear_web_cache_retry">清除网页缓存并重试</string>
+    <string name="redirect_loop_recovery_hint">网页跳转次数过多。可能存在过期的网页缓存，可尝试清除缓存后重试。</string>
+    <string name="redirect_loop_recovery_scope">会清除应用内所有网页的资源缓存，保留登录信息、配置和脚本数据。</string>
+    <string name="cache_clear_failed">清除网页缓存失败，请重试。</string>
     <string name="webdav_upload_record_failed">远端备份已更新，但本机同步记录未能保存。下次上传将重新检查远端版本。</string>
     <string name="config_recovery_title">需要恢复配置</string>
     <string name="config_recovery_message">本机配置无法读取，原文件已保留供恢复。请导入有效备份，或重新开始创建配置。脚本数据不会被清除。</string>

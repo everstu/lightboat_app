@@ -249,29 +249,39 @@
             </LinearLayout>
         </FrameLayout>
 
-        <LinearLayout android:id="@+id/statusPanel" android:layout_width="match_parent"
-            android:layout_height="match_parent" android:orientation="vertical" android:gravity="center"
-            android:padding="32dp" android:background="@color/paper" android:visibility="gone">
-            <ProgressBar android:id="@+id/statusSpinner" android:layout_width="40dp" android:layout_height="40dp"
-                android:indeterminateTint="@color/accent" />
-            <TextView android:id="@+id/statusTitle" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:layout_marginTop="24dp" android:gravity="center"
-                android:text="@string/preparing" android:textSize="22sp" android:textStyle="bold"
-                android:textColor="@color/ink" />
-            <TextView android:id="@+id/statusDetail" android:layout_width="match_parent"
-                android:layout_height="wrap_content" android:layout_marginTop="12dp" android:gravity="center"
-                android:text="@string/preparing_note" android:textSize="15sp" android:textColor="@color/muted"
-                android:lineSpacingExtra="5dp" />
-            <Button android:id="@+id/retryButton" android:layout_width="match_parent" android:layout_height="56dp"
-                android:layout_marginTop="24dp" android:text="@string/retry" android:textColor="@color/white"
-                android:backgroundTint="@color/accent" android:visibility="gone" />
-            <Button android:id="@+id/editButton" android:layout_width="match_parent" android:layout_height="52dp"
-                style="?attr/borderlessButtonStyle" android:text="@string/edit_addresses"
-                android:textColor="@color/accent" android:visibility="gone" />
-            <Button android:id="@+id/debugLogButton" android:layout_width="match_parent" android:layout_height="52dp"
-                style="?attr/borderlessButtonStyle" android:text="@string/debug_logs"
-                android:textColor="@color/accent" />
-        </LinearLayout>
+        <ScrollView android:id="@+id/statusPanel" android:layout_width="match_parent"
+            android:layout_height="match_parent" android:background="@color/paper"
+            android:fillViewport="true" android:visibility="gone">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:gravity="center" android:padding="32dp">
+                <ProgressBar android:id="@+id/statusSpinner" android:layout_width="40dp" android:layout_height="40dp"
+                    android:indeterminateTint="@color/accent" />
+                <TextView android:id="@+id/statusTitle" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="24dp" android:gravity="center"
+                    android:text="@string/preparing" android:textSize="22sp" android:textStyle="bold"
+                    android:textColor="@color/ink" />
+                <TextView android:id="@+id/statusDetail" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="12dp" android:gravity="center"
+                    android:text="@string/preparing_note" android:textSize="15sp" android:textColor="@color/muted"
+                    android:lineSpacingExtra="5dp" />
+                <Button android:id="@+id/retryButton" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:minHeight="56dp" android:layout_marginTop="24dp"
+                    android:text="@string/retry" android:textColor="@color/white"
+                    android:backgroundTint="@color/accent" android:visibility="gone" />
+                <Button android:id="@+id/clearWebCacheRetryButton" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:minHeight="56dp" android:layout_marginTop="12dp"
+                    android:text="@string/clear_web_cache_retry" android:textColor="@color/white"
+                    android:backgroundTint="@color/accent" android:visibility="gone" />
+                <Button android:id="@+id/editButton" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:minHeight="52dp"
+                    style="?attr/borderlessButtonStyle" android:text="@string/edit_addresses"
+                    android:textColor="@color/accent" android:visibility="gone" />
+                <Button android:id="@+id/debugLogButton" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:minHeight="52dp"
+                    style="?attr/borderlessButtonStyle" android:text="@string/debug_logs"
+                    android:textColor="@color/accent" />
+            </LinearLayout>
+        </ScrollView>
         <FrameLayout android:id="@+id/menuLayer" android:layout_width="match_parent" android:layout_height="match_parent"
             android:visibility="gone" android:clipChildren="true" android:clipToPadding="true">
             <com.lightboat.app.EdgeMenuButton android:id="@+id/edgeMenuButton" android:layout_width="48dp"

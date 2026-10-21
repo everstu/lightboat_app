@@ -37,6 +37,7 @@ import android.widget.FrameLayout
 import android.text.InputFilter
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -81,6 +82,10 @@ class MainActivity : AppCompatActivity() {
     private var mediaProxy: MediaRequestProxy? = null
     private var mediaNetwork: MediaRequestClient? = null
     private val scriptHandlers = mutableListOf<ScriptHandler>()
+    // Device tests replace this to exercise the clearCache failure path; the
+    // production implementation always clears through the real WebView API.
+    @VisibleForTesting
+    internal var cacheClearAction: (WebView) -> Unit = { it.clearCache(true) }
     private val worker = Executors.newFixedThreadPool(2)
     private var generation = 0
     private var navigationGeneration = 0L
@@ -885,7 +890,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openProfile(profile: Profile) = openProfile(profile, emptySet())
 
-    private fun openProfile(profile: Profile, skippedScriptIds: Set<String>) {
+    private fun openProfile(profile: Profile, skippedScriptIds: Set<String>, clearWebCache: Boolean = false) {
         DebugLog.event("profile", "open name=${profile.name.take(80)} url=${DebugLog.safeUrl(profile.url)} scripts=${profile.scripts.count { it.enabled }} platform=${profile.platform}")
         if (config.lastProfileId != profile.id && !persist(config.select(profile.id))) return
         hideKeyboard()
@@ -897,6 +902,10 @@ class MainActivity : AppCompatActivity() {
         destroyWebView()
         val navigationRequest = ++navigationGeneration
         currentId = profile.id
+        // A cache clear belongs to this one explicit recovery attempt. It is a
+        // local pending flag, never persisted and never inherited by a later
+        // refresh or profile switch.
+        var cacheClearPending = clearWebCache
         showLoading(R.string.preparing)
         DebugLog.event("profile", "new session navigation=$navigationRequest generation=$generation")
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) ||
@@ -922,6 +931,22 @@ class MainActivity : AppCompatActivity() {
                     try {
                         showLoading(R.string.loading_page)
                         prepareMainWebView(profile)
+                        if (cacheClearPending) {
+                            // clearCache has no completion callback. Run it on
+                            // this brand-new, still-blank WebView's UI thread,
+                            // then continue with the normal install/load flow.
+                            val recoveryView = checkNotNull(webView)
+                            try {
+                                cacheClearAction(recoveryView)
+                                cacheClearPending = false
+                                DebugLog.event("cache-recovery", "clear requested includeDiskFiles=true scope=application")
+                            } catch (error: Exception) {
+                                DebugLog.event("cache-recovery", "clear failed ${error.message.orEmpty().take(240)}")
+                                destroyWebView()
+                                showCacheClearFailed(profile.id)
+                                return@post
+                            }
+                        }
                         createWebView(profile, nativeGuardScript, prepared.toList(), navigationRequest)
                     } catch (error: ScriptInstallationException) {
                         if (!current()) return@post
@@ -931,8 +956,8 @@ class MainActivity : AppCompatActivity() {
                         fun stillCurrent() = !isDestroyed && request == generation && failedNavigation == navigationGeneration
                         showError(R.string.script_error_title, "${error.script.name}：${error.message.orEmpty()}")
                         showNativeDialog(ScriptFailureDialog(this, false,
-                            proceed = { if (stillCurrent()) openProfile(profile, skippedScriptIds + failures.map { it.first.id } + error.script.id) },
-                            retry = { if (stillCurrent()) openProfile(profile, skippedScriptIds) },
+                            proceed = { if (stillCurrent()) openProfile(profile, skippedScriptIds + failures.map { it.first.id } + error.script.id, cacheClearPending) },
+                            retry = { if (stillCurrent()) openProfile(profile, skippedScriptIds, cacheClearPending) },
                             cancelVisit = { if (stillCurrent()) showProfiles() }
                         ).apply { addFailure(error.script, error.message ?: getString(R.string.script_download_error)) })
                     } catch (error: Exception) {
@@ -951,7 +976,7 @@ class MainActivity : AppCompatActivity() {
                     showError(R.string.script_error_title, failures.joinToString("\n") { (script, error) -> "${script.name}：${error.message.orEmpty()}" })
                     showNativeDialog(ScriptFailureDialog(this, false,
                         proceed = { if (current()) openPrepared() },
-                        retry = { if (current()) openProfile(profile, skippedScriptIds) },
+                        retry = { if (current()) openProfile(profile, skippedScriptIds, cacheClearPending) },
                         cancelVisit = { if (current()) showProfiles() }
                     ).apply { failures.forEach { (script, error) -> addFailure(script, error.message ?: getString(R.string.script_download_error)) } })
                 }
@@ -1097,8 +1122,12 @@ class MainActivity : AppCompatActivity() {
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 DebugLog.event("page-error", "${request.method} ${DebugLog.safeUrl(request.url.toString())} code=${error.errorCode} ${error.description}")
                 if (request.isForMainFrame && isCurrentNavigation()) {
+                    // Only a main-frame redirect loop can be caused by this
+                    // app's shared WebView HTTP cache; other failures keep the
+                    // ordinary retry/edit entry points.
                     failPage(if (error.errorCode == ERROR_FAILED_SSL_HANDSHAKE) getString(R.string.bad_certificate)
-                        else error.description.toString())
+                        else error.description.toString(),
+                        allowCacheRecovery = error.errorCode == ERROR_REDIRECT_LOOP)
                 }
             }
 
@@ -1250,13 +1279,17 @@ class MainActivity : AppCompatActivity() {
         if (screen == Screen.PROFILES) binding.returnButton.visibility = View.VISIBLE
     }
 
-    private fun failPage(message: String) {
+    private fun failPage(message: String, allowCacheRecovery: Boolean = false) {
         DebugLog.event("page-error", "main frame failed ${message.take(300)}")
         userScriptHost?.resetDocuments()
         fullscreenPlayer.hide()
         pageFailed = true
         pageReady = false
         webView?.stopLoading()
+        // Only the failed profile can offer cache recovery. Capture its ID now:
+        // the posted teardown below destroys the failed WebView and advances
+        // navigationGeneration, so the error page must not rely on either.
+        val cacheRecoveryProfileId = if (allowCacheRecovery) currentId else null
         val failedView = webView
         val failedNavigation = navigationGeneration
         // Leave the WebView callback before destroying its renderer and media session.
@@ -1266,7 +1299,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (screen in listOf(Screen.BROWSER, Screen.LOADING, Screen.ERROR)) {
-            showError(R.string.page_error_title, message)
+            showError(R.string.page_error_title, message, cacheRecoveryProfileId)
         }
     }
 
@@ -1285,13 +1318,18 @@ class MainActivity : AppCompatActivity() {
         binding.statusSpinner.visibility = View.VISIBLE
         binding.retryButton.visibility = View.GONE
         binding.editButton.visibility = View.GONE
+        resetCacheRecoveryButton()
     }
 
-    private fun showError(title: Int, message: String) {
+    private fun showError(title: Int, message: String, cacheRecoveryProfileId: String? = null) {
         DebugLog.event("ui-error", "${getString(title)} ${message.take(300)}")
         showScreen(Screen.ERROR)
         binding.statusTitle.setText(title)
-        binding.statusDetail.text = message
+        binding.statusDetail.text = if (cacheRecoveryProfileId == null) message else listOf(
+            message,
+            getString(R.string.redirect_loop_recovery_hint),
+            getString(R.string.redirect_loop_recovery_scope)
+        ).joinToString("\n\n")
         binding.statusSpinner.visibility = View.GONE
         binding.retryButton.visibility = View.VISIBLE
         binding.editButton.visibility = View.VISIBLE
@@ -1299,7 +1337,61 @@ class MainActivity : AppCompatActivity() {
         binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchLast() }
         binding.editButton.setText(R.string.edit_addresses)
         binding.editButton.setOnClickListener { showProfiles() }
+        // Every error page starts without the recovery entry; a stale click
+        // listener from an earlier redirect loop must never act on this page.
+        resetCacheRecoveryButton()
+        if (cacheRecoveryProfileId != null) {
+            binding.clearWebCacheRetryButton.visibility = View.VISIBLE
+            binding.clearWebCacheRetryButton.setOnClickListener { retryAfterClearingWebCache(cacheRecoveryProfileId) }
+        }
         updatePageProgress(binding.pageProgress.progress, false)
+    }
+
+    private fun resetCacheRecoveryButton() {
+        binding.clearWebCacheRetryButton.apply {
+            visibility = View.GONE
+            isEnabled = true
+            setOnClickListener(null)
+        }
+    }
+
+    /** Runs one explicit cache clear followed by a normal reopen of [profileId]. */
+    private fun retryAfterClearingWebCache(profileId: String) {
+        val button = binding.clearWebCacheRetryButton
+        // showLoading hides the button as soon as the reopen starts. This guard
+        // blocks a second tap if the reopen is refused synchronously instead.
+        if (!button.isEnabled || screen != Screen.ERROR) return
+        if (currentId != profileId) {
+            // Another profile is now current; this error page is stale.
+            resetCacheRecoveryButton()
+            return
+        }
+        val profile = config.profiles.firstOrNull { it.id == profileId }
+        if (profile == null) {
+            // The failed profile was deleted or replaced while this page stayed up.
+            resetCacheRecoveryButton()
+            return
+        }
+        button.isEnabled = false
+        DebugLog.event("cache-recovery",
+            "requested profile=${profile.id.take(80)} navigation=$navigationGeneration url=${DebugLog.safeUrl(profile.url)}")
+        openProfile(profile, emptySet(), clearWebCache = true)
+        // A synchronous refusal (for example a failed config save) leaves this
+        // error page in place; keep the explicit entry operable in that case.
+        if (screen == Screen.ERROR) button.isEnabled = true
+    }
+
+    /**
+     * The clear failed before the new page loaded. Its retry must repeat the
+     * explicit recovery: a plain reopen would still see the cached redirect.
+     */
+    private fun showCacheClearFailed(profileId: String) {
+        showError(R.string.page_error_title, getString(R.string.cache_clear_failed))
+        binding.retryButton.setOnClickListener {
+            if (screen != Screen.ERROR || currentId != profileId) return@setOnClickListener
+            val profile = config.profiles.firstOrNull { it.id == profileId }
+            if (profile == null) launchLast() else openProfile(profile, emptySet(), clearWebCache = true)
+        }
     }
 
     private fun showConfigImport(file: Uri? = null) {
