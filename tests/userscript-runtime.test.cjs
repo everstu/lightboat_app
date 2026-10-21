@@ -15,7 +15,7 @@ test('Shared URL normalization and matching vectors agree with the native matche
 });
 
 function harness(meta = {}, { url = 'https://example.com/page', frame = false, state = 'loading', values = {}, deferWrites = false, streamSnapshot = false,
-  timers = { setTimeout, clearTimeout } } = {}) {
+  lazy = false, deferReads = false, timers = { setTimeout, clearTimeout } } = {}) {
   const messages = [], nodes = [], listeners = {}, observers = [];
   const head = { appendChild(node) { nodes.push(node); } };
   const document = {
@@ -28,13 +28,23 @@ function harness(meta = {}, { url = 'https://example.com/page', frame = false, s
   window.top = frame ? {} : window;
   const bridge = { postMessage(text) {
     const msg = JSON.parse(text); messages.push(msg);
-    if (msg.op === 'hello' && streamSnapshot) return;
+    if (msg.op === 'hello') {
+      if (streamSnapshot) return;
+      bridge.onmessage({ data: JSON.stringify({ doc: msg.doc, id: msg.id,
+        result: lazy ? { readMode: 'lazy' } : { ...values, readMode: 'eager' } }) }); return;
+    }
+    if (msg.op === 'getValue') {
+      if (deferReads) return;
+      const present = Object.prototype.hasOwnProperty.call(values, msg.key);
+      bridge.onmessage({ data: JSON.stringify({ doc: msg.doc, id: msg.id,
+        result: { present, value: present ? values[msg.key] : null } }) }); return;
+    }
     if (['valueBegin', 'valueChunk'].includes(msg.op)) {
       bridge.onmessage({data: JSON.stringify({doc: msg.doc, id: msg.id, result: null})}); return;
     }
-    if (['hello', 'setValue', 'deleteValue', 'menuRegister', 'menuRemove', 'clipboard', 'notification'].includes(msg.op) &&
+    if (['setValue', 'deleteValue', 'menuRegister', 'menuRemove', 'clipboard', 'notification'].includes(msg.op) &&
         !(deferWrites && ['setValue', 'deleteValue'].includes(msg.op))) {
-      bridge.onmessage({ data: JSON.stringify({ doc: msg.doc, id: msg.id, result: msg.op === 'hello' ? values : null }) });
+      bridge.onmessage({ data: JSON.stringify({ doc: msg.doc, id: msg.id, result: null }) });
     }
   }};
   window.LightboatGM = bridge;
@@ -254,6 +264,87 @@ test('Modern storage promises preserve nested values and undefined', async () =>
   assert.equal(h.context.window.deleted, 'gone');
 });
 
+test('Lazy GM.getValue reads only requested keys, returns fallbacks and rejects native errors', async () => {
+  const h = harness({ runAt: 'document-start', grant: ['GM.getValue'] },
+    { lazy: true, values: { cached: { type: 'json', value: 'large' } } });
+  h.run(`window.started=true; window.read=GM.getValue('cached');
+    window.missing=GM.getValue('absent','fallback');`);
+  assert.equal(h.context.window.started, undefined, 'The script must wait for the lazy mode handshake');
+  await flush();
+  assert.equal(h.context.window.started, true);
+  assert.equal(await h.context.window.read, 'large');
+  assert.equal(await h.context.window.missing, 'fallback');
+  assert.ok(!h.messages.some(message => message.op === 'snapshotValue'), 'Lazy hello must not stream a snapshot');
+  assert.deepEqual(h.messages.filter(message => message.op === 'getValue').map(message => message.key),
+    ['cached', 'absent']);
+
+  const failed = harness({ runAt: 'document-start', grant: ['GM.getValue'] },
+    { lazy: true, values: {}, deferReads: true });
+  failed.run(`window.read=GM.getValue('cached');`);
+  await flush();
+  const request = failed.messages.find(message => message.op === 'getValue');
+  failed.reply({ id: request.id, error: 'native read failed' });
+  await assert.rejects(failed.context.window.read, /native read failed/);
+});
+
+test('Lazy getValue consumes the native result envelope and reuses the cached key', async () => {
+  const h = harness({ runAt: 'document-start', grant: ['GM.getValue'] },
+    { lazy: true, values: { rules: { type: 'json', value: 'stored-rules' } } });
+  h.run('window.first=GM.getValue("rules"); window.second=GM.getValue("rules");');
+  await flush();
+  assert.equal(await h.context.window.first, 'stored-rules');
+  assert.equal(await h.context.window.second, 'stored-rules');
+  const requests = h.messages.filter(message => message.op === 'getValue');
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every(request => request.key === 'rules'));
+});
+
+test('Synchronous GM_getValue still waits for and reads the startup snapshot', async () => {
+  const h = harness({ runAt: 'document-start', grant: ['GM_getValue'] },
+    { values: { key: { type: 'json', value: 42 } } });
+  h.run('window.value=GM_getValue("key"); window.started=true;');
+  assert.equal(h.context.window.started, undefined);
+  await flush();
+  assert.equal(h.context.window.value, 42);
+  assert.equal(h.context.window.started, true);
+  assert.ok(!h.messages.some(message => message.op === 'getValue'));
+});
+
+test('An earlier lazy read response cannot overwrite a newer pending local write', async () => {
+  const h = harness({ runAt: 'document-start', grant: ['GM.getValue', 'GM.setValue'] },
+    { lazy: true, deferReads: true, deferWrites: true });
+  h.run('window.read=()=>GM.getValue("key"); window.write=()=>GM.setValue("key","new");');
+  await flush();
+  const reading = h.context.window.read();
+  await flush();
+  const readRequest = h.messages.find(message => message.op === 'getValue');
+  const writing = h.context.window.write();
+  await flush();
+  const writeRequest = h.messages.find(message => message.op === 'setValue');
+  h.reply({ id: readRequest.id, result: { present: true, value: { type: 'json', value: 'old' } } });
+  assert.equal(await reading, 'new');
+  h.reply({ id: writeRequest.id, result: null });
+  await writing;
+});
+
+test('Read and write grants expose only their own value APIs', async () => {
+  const readOnly = harness({ runAt: 'document-start', grant: ['GM.getValue'] },
+    { lazy: true, values: { key: { type: 'json', value: 1 } } });
+  readOnly.run('window.read=typeof GM.getValue; window.write=typeof GM.setValue; window.legacy=typeof GM_getValue;');
+  await flush();
+  assert.equal(readOnly.context.window.read, 'function');
+  assert.equal(readOnly.context.window.write, 'undefined');
+  assert.equal(readOnly.context.window.legacy, 'undefined');
+
+  const writeOnly = harness({ runAt: 'document-start', grant: ['GM.setValue'] });
+  writeOnly.run('window.read=typeof GM.getValue; window.write=typeof GM.setValue; window.started=true;');
+  assert.equal(writeOnly.context.window.started, true);
+  await flush();
+  assert.equal(writeOnly.context.window.read, 'undefined');
+  assert.equal(writeOnly.context.window.write, 'function');
+  assert.ok(!writeOnly.messages.some(message => message.op === 'getValue'));
+});
+
 test('Earlier remote notifications cannot overwrite a newer pending local write', async () => {
   const h = harness({ runAt: 'document-start', grant: ['GM_getValue', 'GM_setValue'] },
     { deferWrites: true, timers: fakeTimers().api });
@@ -374,12 +465,34 @@ test('Restored documents reconnect storage and menu callbacks without rerunning 
   h.listeners['window:pageshow']({ persisted: true });
   await flush();
   assert.equal(h.messages.filter(msg => msg.op === 'hello').length, 2);
+  assert.equal(h.messages.filter(msg => msg.op === 'hello').at(-1).restore, true);
   const registrations = h.messages.filter(msg => msg.op === 'menuRegister');
   assert.equal(registrations.length, 2);
   assert.equal(registrations[1].title, 'Inspect');
   assert.equal(registrations[1].menuId, registrations[0].menuId);
   assert.equal(h.context.window.read(), 'second');
   assert.equal(h.context.window.removed(), 'gone');
+  assert.equal(h.context.window.runs, 1);
+  h.reply({ event: 'menu', menuId: h.context.window.menu });
+  assert.equal(h.context.window.clicked, true);
+});
+
+test('Lazy BFCache restore re-registers menus and marks the hello as a restore', async () => {
+  const h = harness({ runAt: 'document-start', grant: ['GM.getValue', 'GM_registerMenuCommand'] },
+    { lazy: true, values: { key: { type: 'json', value: 'value' } } });
+  h.run(`window.runs=(window.runs||0)+1;
+    window.menu=GM_registerMenuCommand('Lazy inspect',()=>window.clicked=true);`);
+  await flush();
+  assert.equal(h.context.window.runs, 1);
+  assert.equal(h.messages.filter(msg => msg.op === 'menuRegister').length, 1);
+  h.listeners['window:pagehide']({ persisted: true });
+  h.listeners['window:pageshow']({ persisted: true });
+  await flush();
+  assert.equal(h.messages.filter(msg => msg.op === 'hello').length, 2);
+  assert.equal(h.messages.filter(msg => msg.op === 'hello').at(-1).restore, true);
+  const registrations = h.messages.filter(msg => msg.op === 'menuRegister');
+  assert.equal(registrations.length, 2);
+  assert.equal(registrations[1].menuId, registrations[0].menuId);
   assert.equal(h.context.window.runs, 1);
   h.reply({ event: 'menu', menuId: h.context.window.menu });
   assert.equal(h.context.window.clicked, true);

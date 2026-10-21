@@ -22,9 +22,13 @@ internal class ScriptMessageTransport(private val doc: String, private val reply
     fun send(message: JSONObject) = sendParts(listOf(message.toString()))
 
     fun sendValue(event: String, key: String, value: String?, deleted: Boolean = false) {
-        val header = JSONObject().put("doc", doc).put("event", event).put("key", key).put("deleted", deleted)
-            .toString().dropLast(1) + ",\"value\":"
-        sendParts(listOf(header, value ?: "null", "}"))
+        sendParts(ScriptMessageFraming.value(doc, event, key, value, deleted))
+    }
+
+    /** A GM.getValue reply; [value] is already the encoded JSON value text. */
+    fun sendValueResult(id: String, value: String?) {
+        // JS RPC resolves message.result, so the payload must be nested there.
+        sendParts(ScriptMessageFraming.valueResult(doc, id, value))
     }
 
     private fun sendParts(parts: List<String>) {

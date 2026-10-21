@@ -15,9 +15,12 @@ function LightboatRuntime(spec, entry) {
   const MAX_BYTES = 10 * 1024 * 1024, CHUNK_CHARS = 32 * 1024;
   const values = Object.assign(Object.create(null), spec.values);
   const valueWrites = new Map();
+  const valueRevisions = new Map();
+  const bumpRevision = key => valueRevisions.set(key, (valueRevisions.get(key) || 0) + 1);
+  const hasValue = key => Object.prototype.hasOwnProperty.call(values, key);
   const valueListeners = new Map();
   const menus = new Map();
-  let suspended = false, reconnecting = false, executed = false, scheduled = false;
+  let suspended = false, reconnecting = false, executed = false, scheduled = false, lazyReads = false;
   let restoredValues = null;
   const unavailableResourceWarnings = new Set();
   let sequence = 0;
@@ -84,6 +87,7 @@ function LightboatRuntime(spec, entry) {
       }
       const old = values[message.key];
       if (message.deleted) delete values[message.key]; else values[message.key] = message.value;
+      bumpRevision(message.key);
       notifyValue(message.key, old, values[message.key], true);
       return;
     }
@@ -159,8 +163,35 @@ function LightboatRuntime(spec, entry) {
     }
   };
   const sendDetached = (op, data) => rpc(op, data).promise.catch(error => report('error', errorText(error)));
+  const reconnectMenus = () => {
+    for (const [menuId, menu] of menus) sendDetached('menuRegister', { menuId, title: menu.title });
+  };
+  const takeReadMode = snapshot => {
+    const mode = snapshot && typeof snapshot === 'object' ? snapshot.readMode : undefined;
+    if (snapshot && typeof snapshot === 'object') delete snapshot.readMode;
+    return mode === 'lazy' ? 'lazy' : 'eager';
+  };
   const getValue = (key, fallback) => Object.hasOwn ? (Object.hasOwn(values, key) ? decode(values[key]) : fallback) :
     (Object.prototype.hasOwnProperty.call(values, key) ? decode(values[key]) : fallback);
+  // Modern GM.getValue reads one key on demand instead of waiting for every value.
+  const lazyGetValue = (key, fallback) => {
+    key = String(key);
+    if (key.length > 512) return Promise.reject(new Error('GM 存储键不能超过 512 字符'));
+    const revision = valueRevisions.get(key) || 0;
+    return rpc('getValue', { key }).promise.then(result => {
+      // A local write (or a newer remote change) started after this read was sent.
+      // Never roll its optimistic/confirmed value back to this older response.
+      if ((valueRevisions.get(key) || 0) !== revision || valueWrites.has(key)) {
+        return hasValue(key) ? decode(values[key]) : fallback;
+      }
+      if (!result || result.present !== true) {
+        delete values[key];
+        return fallback;
+      }
+      values[key] = result.value;
+      return decode(values[key]);
+    });
+  };
   let storageQueue = Promise.resolve();
   const writeValue = (op, key, previous, data = {}) => {
     let state = valueWrites.get(key);
@@ -202,6 +233,7 @@ function LightboatRuntime(spec, entry) {
     const old = values[key];
     const next = encode(value);
     values[key] = next;
+    bumpRevision(key);
     const request = writeValue('setValue', key, old, { value: next });
     notifyValue(key, old, next, false);
     if (wait) return request;
@@ -210,6 +242,7 @@ function LightboatRuntime(spec, entry) {
   const deleteValue = (key, wait) => {
     key = String(key);
     const old = values[key]; delete values[key];
+    bumpRevision(key);
     const request = writeValue('deleteValue', key, old);
     notifyValue(key, old, undefined, false);
     if (wait) return request;
@@ -361,6 +394,8 @@ function LightboatRuntime(spec, entry) {
     const modern = name === 'xmlhttpRequest' ? 'xmlHttpRequest' : name;
     if (permitted('GM.' + modern)) {
       if (modern === 'xmlHttpRequest') GM[modern] = details => xhr(details, true);
+      else if (modern === 'getValue') GM[modern] = (key, fallback) => lazyReads ? lazyGetValue(key, fallback) :
+        Promise.resolve().then(() => getValue(key, fallback));
       else if (modern === 'setValue') GM[modern] = (key, value) => setValue(key, value, true);
       else if (modern === 'deleteValue') GM[modern] = key => deleteValue(key, true);
       else if (modern === 'setValues') GM[modern] = entries => Promise.all(Object.entries(entries).map(([key, value]) => setValue(key, value, true))).then(() => undefined);
@@ -435,7 +470,16 @@ function LightboatRuntime(spec, entry) {
     // A restored document retains its JS hooks and callbacks. Reconnect its native
     // session and menu registrations without executing the userscript a second time.
     restoredValues = Object.create(null);
-    rpc('hello').promise.then(snapshot => {
+    rpc('hello', { restore: true }).promise.then(snapshot => {
+      const mode = takeReadMode(snapshot);
+      lazyReads = mode === 'lazy';
+      if (mode === 'lazy') {
+        // Even a lazy restore must re-register menus after pagehide disposed them.
+        reconnectMenus();
+        suspended = false;
+        schedule();
+        return;
+      }
       Object.assign(restoredValues, snapshot);
       const next = restoredValues;
       restoredValues = null;
@@ -447,18 +491,30 @@ function LightboatRuntime(spec, entry) {
         const exists = Object.prototype.hasOwnProperty.call(next, key);
         if (existed === exists && sameValue(previous, value)) continue;
         if (exists) values[key] = value; else delete values[key];
+        bumpRevision(key);
         changes.push([key, previous, value]);
       }
       // All keys are current before a callback can read the restored snapshot.
       for (const [key, previous, value] of changes) notifyValue(key, previous, value, true);
-      for (const [menuId, menu] of menus) sendDetached('menuRegister', { menuId, title: menu.title });
+      reconnectMenus();
       suspended = false;
       schedule();
     }).catch(error => report('error', errorText(error))).finally(() => { restoredValues = null; reconnecting = false; });
   });
   const hello = rpc('hello').promise;
   report('info', meta.name + ' 已匹配（' + executionContext + '）；等待 ' + meta.runAt);
-  if ([...grants].some(grant => /(?:Value|Values)/.test(grant))) {
-    hello.then(snapshot => { Object.assign(values, snapshot); schedule(); }).catch(error => { if (!suspended) executionFailed(error); });
+  const syncReadGrants = ['GM_getValue', 'GM_getValues', 'GM_listValues', 'GM.getValues', 'GM.listValues'];
+  const needsFullSnapshot = !grants.has('none') && [...grants].some(grant => syncReadGrants.includes(grant));
+  const modernGetValue = !grants.has('none') && grants.has('GM.getValue');
+  if (needsFullSnapshot) {
+    // Legacy synchronous readers must keep the complete snapshot-before-run behavior.
+    hello.then(snapshot => {
+      takeReadMode(snapshot); lazyReads = false;
+      Object.assign(values, snapshot); schedule();
+    }).catch(error => { if (!suspended) executionFailed(error); });
+  } else if (modernGetValue) {
+    // Lazy mode only waits for the mode handshake, never for value contents.
+    hello.then(snapshot => { lazyReads = takeReadMode(snapshot) === 'lazy'; schedule(); })
+      .catch(error => { if (!suspended) executionFailed(error); });
   } else { hello.catch(error => report('error', errorText(error))); schedule(); }
 }

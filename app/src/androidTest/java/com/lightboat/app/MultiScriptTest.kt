@@ -94,10 +94,28 @@ class MultiScriptTest {
         scenario?.close(); server.stop()
         backup?.let(configFile::writeBytes) ?: configFile.delete()
         for (scriptId in listOf("a", "b")) {
-            val hash = java.security.MessageDigest.getInstance("SHA-256").digest("$id:$scriptId:multi-test:Same name".toByteArray())
-                .joinToString("") { "%02x".format(it.toInt() and 255) }
-            File(context.filesDir, "userscript-values/$hash.json").delete()
+            for (identity in listOf("$id:$scriptId:multi-test:Same name", "$scriptId:multi-test:Same name")) {
+                val hash = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
+                    .joinToString("") { "%02x".format(it.toInt() and 255) }
+                File(context.filesDir, "userscript-values/$hash.json").delete()
+                File(context.filesDir, "userscript-values/$hash.json.bak").delete()
+            }
         }
+    }
+
+    @Test fun theSameSharedScriptReadsItsGmValueAfterSwitchingProfiles() {
+        val first = Profile("$id-a", "First profile", "$base/first-page", listOf(ProfileScript("a")))
+        val second = Profile("$id-b", "Second profile", "$base/second-page", listOf(ProfileScript("a")))
+        ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(AppConfig(first.id, listOf(first, second),
+            scriptLibrary = listOf(SharedScript("a", "First", "$base/a.user.js"))))
+        launch()
+        waitFor { javascript("window.ready_a===true") == "true" }
+        assertEquals("\"empty\"", javascript("window.initial_a"))
+        scenario!!.onActivity { activity ->
+            MainActivity::class.java.getDeclaredMethod("openProfile", Profile::class.java)
+                .apply { isAccessible = true }.invoke(activity, second)
+        }
+        waitFor { javascript("window.initial_a==='a' && window.ready_a===true") == "true" }
     }
 
     @Test fun sameNamedScriptsKeepIndependentStorageMenusAndStylesAcrossNavigationAndReload() {

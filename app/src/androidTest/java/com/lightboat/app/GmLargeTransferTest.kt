@@ -109,6 +109,13 @@ class GmLargeTransferTest {
             .digest("$identity:large:lightboat-test:Large GM regression".toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
         File(context.filesDir, "userscript-values/$hash.json").delete()
         File(context.filesDir, "userscript-values/$hash.json.bak").delete()
+        val sharedHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest("large:lightboat-test:Large GM regression".toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
+        File(context.filesDir, "userscript-values/$sharedHash.json").delete()
+        File(context.filesDir, "userscript-values/$sharedHash.json.bak").delete()
+        val legacyHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest("$identity:lightboat-test:Large GM regression".toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
+        File(context.filesDir, "userscript-values/$legacyHash.json").delete()
     }
 
     @Test fun largeResponseStorageReloadBinaryAndRemoteFrameRemainCompatible() {
@@ -175,7 +182,7 @@ class GmLargeTransferTest {
         """.trimIndent())
         waitFor("Concurrent frame writes did not converge", "window.countersSaved===true")
         val persisted = JSONObject(ScriptValueStore(context,
-            "$identity:large:lightboat-test:Large GM regression").encoded("counter")!!).getInt("value")
+            "large:lightboat-test:Large GM regression").encoded("counter")!!).getInt("value")
         assertEquals(persisted.toString(), javascript("window.readCounter()"))
         assertEquals(persisted.toString(), javascript("document.getElementById('frame').contentWindow.readCounter()"))
     }

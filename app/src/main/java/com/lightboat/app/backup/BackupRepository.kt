@@ -50,6 +50,9 @@ internal class BackupRepository(context: Context, private val defaultUserAgent: 
         val currentConfig = ConfigCodec.encode(currentStore.loadForRestore())
         val currentPreferences = readPreferences(app)
         transaction.install(candidate, currentConfig, currentPreferences, options, currentStore.recoveryRequired)?.deleteRecursively()
+        // The directory swap happened on this same storage-queue task. Active
+        // hosts must reload from the restored files instead of their old snapshots.
+        ScriptStorage.invalidateValueStores()
         ConfigStore(app, defaultUserAgent).completeRecovery()
         return ConfigStore(app, defaultUserAgent).load()
     }

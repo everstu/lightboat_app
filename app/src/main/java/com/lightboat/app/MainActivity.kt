@@ -1161,7 +1161,7 @@ class MainActivity : AppCompatActivity() {
             scriptHandlers += WebViewCompat.addDocumentStartJavaScript(view, identity, setOf("*"))
         }
         var runtimeFailureDialog: ScriptFailureDialog? = null
-        userScriptHost = if (bundles.isEmpty()) null else UserScriptGroup(this, view, profile, bundles) { script, message ->
+        userScriptHost = if (bundles.isEmpty()) null else UserScriptGroup(this, view, profile, bundles, config) { script, message ->
             binding.root.post {
                 if (!isCurrentNavigation() || pageFailed || screen != Screen.BROWSER) return@post
                 val dialog = runtimeFailureDialog?.takeIf { it.isShowing } ?: ScriptFailureDialog(this, true,

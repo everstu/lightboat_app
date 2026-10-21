@@ -3,6 +3,7 @@ package com.lightboat.app.userscript
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -16,7 +17,6 @@ import androidx.webkit.WebViewCompat
 import com.lightboat.app.AppWebView
 import com.lightboat.app.Profile
 import com.lightboat.app.SharedScript
-import com.lightboat.app.ProfileScript
 import com.lightboat.app.DebugLog
 import org.json.JSONObject
 import java.net.URI
@@ -52,6 +52,27 @@ internal object ScriptStorage {
         cleanups.addLast(task)
         drainCleanups()
     }
+    /** Acquire the process-wide store for [identity]; every operation is queued. */
+    fun acquireValueStore(context: Context, identity: String, candidates: List<String>): ScriptValueLease {
+        val lease = ScriptValueLease(identity)
+        val appContext = context.applicationContext
+        val accepted = submit {
+            try { ScriptValueRegistry.acquire(appContext, lease, candidates) }
+            catch (error: Throwable) {
+                lease.failure = error.message ?: "GM 存储不可用"
+                DebugLog.event("userscript-store", "store acquire failed (${error.javaClass.simpleName})")
+            }
+        }
+        if (!accepted) lease.failure = "GM 存储繁忙，请稍后重试"
+        return lease
+    }
+    fun releaseValueStore(lease: ScriptValueLease) {
+        if (lease.released) return
+        lease.released = true
+        if (!submit { ScriptValueRegistry.release(lease) }) cleanup { ScriptValueRegistry.release(lease) }
+    }
+    /** Must be called on the storage queue after a backup restore swaps the GM directory. */
+    internal fun invalidateValueStores() = ScriptValueRegistry.invalidateAll()
     private fun drainCleanups() {
         main.removeCallbacks(retryCleanup)
         while (cleanups.isNotEmpty()) {
@@ -82,7 +103,7 @@ class UserScriptHost(
     private val profile: Profile,
     private val bundle: ScriptBundle,
     private val script: SharedScript,
-    reference: ProfileScript,
+    migrationCandidates: List<String>,
     private val onExecutionFailure: (String) -> Unit = {},
 ) {
     data class Menu(val doc: String, val id: String, val title: String)
@@ -95,8 +116,13 @@ class UserScriptHost(
     companion object {
         // Single operation table: adding an operation only extends this map and the dispatch below.
         private val VALUE_WRITES = listOf("GM_setValue", "GM.setValue", "GM_setValues", "GM.setValues")
+        // These synchronous reads need the complete startup snapshot. Modern
+        // GM.getValue is deliberately not in this set.
+        private val SNAPSHOT_READ_GRANTS = setOf("GM_getValue", "GM_getValues", "GM_listValues",
+            "GM.getValues", "GM.listValues")
         private val OPERATIONS: Map<String, List<String>> = mapOf(
             "setValue" to VALUE_WRITES, "valueBegin" to VALUE_WRITES, "valueChunk" to VALUE_WRITES,
+            "getValue" to listOf("GM.getValue"),
             "deleteValue" to listOf("GM_deleteValue", "GM.deleteValue", "GM_deleteValues", "GM.deleteValues"),
             "menuRegister" to listOf("GM_registerMenuCommand", "GM.registerMenuCommand"),
             "menuRemove" to listOf("GM_unregisterMenuCommand", "GM.unregisterMenuCommand"),
@@ -110,8 +136,9 @@ class UserScriptHost(
     private val bridgeName = "LightboatGM_" + UUID.randomUUID().toString().replace("-", "")
     val consoleSource = "lightboat-userscript-" + UUID.nameUUIDFromBytes(script.id.toByteArray()).toString() + ".js"
     private val metadataIdentity = bundle.metadata.first("namespace") + ":" + bundle.metadata.name
-    private val store = ScriptValueStore(activity, profile.id + ":" + script.id + ":" + metadataIdentity,
-        if (reference.legacyStorage) profile.id + ":" + metadataIdentity else null)
+    private val storeLease = ScriptStorage.acquireValueStore(activity,
+        ScriptValueIdentity.canonical(script.id, metadataIdentity), migrationCandidates)
+    private val store get() = storeLease.requireStore()
     private val network = ScriptNetwork(bundle.metadata, profile.userAgent)
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = linkedMapOf<String, Session>()
@@ -200,18 +227,23 @@ class UserScriptHost(
                 if (op == "hello") {
                     // Document callbacks and frame messages have independent timing.
                     // A handshake may replace only the same document's session.
-                    if (sessions.containsKey(doc)) dispose(doc)
+                    val restored = payload.optBoolean("restore", false) || sessions.containsKey(doc)
+                    if (restored) dispose(doc)
                     require(sessions.size < 100) { "脚本 frame 数量超过上限" }
                     val session = Session(address, reply, ScriptMessageTransport(doc, reply, handler))
                     sessions[doc] = session
-                    val readsValues = meta.grants.any { it.contains("Value") }
-                    if (readsValues && "none" !in meta.grants) storageTask(session, {
-                        store.forEachEncoded { key, value ->
-                            if (!session.closed) session.transport.sendValue("snapshotValue", key, value)
-                        }
-                        JSONObject()
-                    })
-                    else respond(JSONObject())
+                    val syncReads = meta.grants.any { it in SNAPSHOT_READ_GRANTS } && "none" !in meta.grants
+                    val lazyReads = !syncReads && meta.permits("GM.getValue")
+                    if (restored || syncReads) {
+                        // Restored documents always use the full snapshot path so their
+                        // caches and local values become current again.
+                        storageTask(session, {
+                            store.forEachEncoded { key, value ->
+                                if (!session.closed) session.transport.sendValue("snapshotValue", key, value)
+                            }
+                            JSONObject().put("readMode", "eager")
+                        })
+                    } else respond(JSONObject().put("readMode", if (lazyReads) "lazy" else "eager"))
                     return@addWebMessageListener
                 }
                 val session = sessions[doc] ?: error("脚本文档已失效")
@@ -238,6 +270,35 @@ class UserScriptHost(
                     }
                 }
                 when (op) {
+                    "getValue" -> {
+                        val key = payload.getString("key")
+                        require(key.length <= 512) { "存储键不能超过 512 字符" }
+                        // This response may be several MiB, so send it through the
+                        // existing acknowledged chunk path from the storage worker.
+                        val accepted = ScriptStorage.submit {
+                            val outcome = runCatching { store.encoded(key) }
+                            outcome.fold(onSuccess = { encoded ->
+                                try { session.transport.sendValueResult(id, encoded) }
+                                catch (error: Exception) {
+                                    handler.post {
+                                        if (!alive || session.closed || sessions[doc] !== session) return@post
+                                        log("error", error.message.orEmpty())
+                                        respond(error = error.message ?: "GM 读取失败")
+                                    }
+                                }
+                            }, onFailure = { error ->
+                                handler.post {
+                                    if (!alive || session.closed || sessions[doc] !== session) return@post
+                                    log("error", error.message.orEmpty())
+                                    respond(error = error.message ?: "GM 存储失败")
+                                }
+                            })
+                        }
+                        if (!accepted) {
+                            log("error", "GM 存储繁忙，请稍后重试")
+                            respond(error = "GM 存储繁忙，请稍后重试")
+                        }
+                    }
                     "valueBegin" -> {
                         val key = payload.getString("key")
                         val length = payload.getInt("characters")
@@ -365,6 +426,7 @@ class UserScriptHost(
         sessions.keys.toList().forEach(::dispose)
         commands.clear(); commandsChanged(); commandListeners.clear(); handler.removeCallbacksAndMessages(null)
         runCatching { WebViewCompat.removeWebMessageListener(view, bridgeName) }
+        ScriptStorage.releaseValueStore(storeLease)
     }
 
     private fun sameOrigin(uri: URI, origin: Uri): Boolean {

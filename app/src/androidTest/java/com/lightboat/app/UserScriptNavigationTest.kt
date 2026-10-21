@@ -76,10 +76,12 @@ class UserScriptNavigationTest {
         scenario?.close(); server.stop()
         backup?.let(configFile::writeBytes) ?: configFile.delete()
         val migratedId = UUID.nameUUIDFromBytes("$base/script.user.js".toByteArray()).toString()
-        for (identity in listOf(storeIdentity, "$profileId:$migratedId:lightboat-test:Navigation GM regression")) {
+        for (identity in listOf(storeIdentity, "$profileId:$migratedId:lightboat-test:Navigation GM regression",
+                "$migratedId:lightboat-test:Navigation GM regression")) {
             val hash = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
                 .joinToString("") { "%02x".format(it.toInt() and 255) }
             File(context.filesDir, "userscript-values/$hash.json").delete()
+            File(context.filesDir, "userscript-values/$hash.json.bak").delete()
         }
     }
 

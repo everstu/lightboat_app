@@ -4,6 +4,7 @@ import android.app.Activity
 import android.annotation.SuppressLint
 import android.webkit.ConsoleMessage
 import androidx.webkit.ScriptHandler
+import com.lightboat.app.AppConfig
 import com.lightboat.app.AppWebView
 import com.lightboat.app.Profile
 import com.lightboat.app.SharedScript
@@ -14,14 +15,21 @@ class ScriptInstallationException(val script: SharedScript, cause: Exception) : 
 
 /** One native host/bridge per script; the browser UI sees one combined command list. */
 class UserScriptGroup(activity: Activity, view: AppWebView, profile: Profile, prepared: List<PreparedScript>,
+    config: AppConfig,
     private val onExecutionFailure: (SharedScript, String) -> Unit = { _, _ -> }) {
     data class Menu(val host: UserScriptHost, val command: UserScriptHost.Menu, val title: String)
     private val reportedFailures = mutableSetOf<String>()
     private fun executionFailed(script: SharedScript, message: String) {
         if (reportedFailures.add(script.id)) onExecutionFailure(script, message)
     }
-    private val hosts = prepared.map { item -> item.script to UserScriptHost(activity, view, profile, item.bundle,
-        item.script, profile.scripts.first { it.scriptId == item.script.id }) { message -> executionFailed(item.script, message) } }
+    private val hosts = prepared.map { item ->
+        val metadata = item.bundle.metadata
+        val metadataIdentity = metadata.first("namespace") + ":" + metadata.name
+        val candidates = ScriptValueIdentity.migrationCandidates(config, profile, item.script, metadataIdentity)
+        item.script to UserScriptHost(activity, view, profile, item.bundle, item.script, candidates) { message ->
+            executionFailed(item.script, message)
+        }
+    }
     val menus get() = hosts.flatMap { (script, host) -> host.menus.map { Menu(host, it, "${script.name} · ${it.title}") } }
     @SuppressLint("RequiresFeature") // MainActivity checks DOCUMENT_START_SCRIPT before preparing any group.
     fun install(): List<ScriptHandler> {
