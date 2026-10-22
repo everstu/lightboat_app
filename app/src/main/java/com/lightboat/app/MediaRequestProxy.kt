@@ -116,8 +116,10 @@ internal class MediaRequestProxy(
                     override fun getRequestStatus() = upstream.code
                     override fun getDescription() = "${upstream.code} ${upstream.message.ifBlank { "Response" }}"
                 }
-                val mime = upstream.header("Content-Type").orEmpty().substringBefore(';').ifBlank { "application/octet-stream" }
-                require(isMediaType(mime)) { "Upstream is not a media resource" }
+                val mime = mediaType(upstream, remoteUri)
+                require(isMediaType(mime)) {
+                    "Upstream is not a media resource (status=${upstream.code}, type=$mime)"
+                }
                 val body = upstream.body
                 val manifest = session.method == Method.GET && manifestResource
                 if (manifestResource) require(upstream.code !in setOf(206, 304)) { "Upstream did not return a complete HLS manifest" }
@@ -201,6 +203,32 @@ internal class MediaRequestProxy(
         // Do not occupy a streaming worker waiting for an idle loopback keepalive.
         result.addHeader("Connection", "close")
         return result
+    }
+
+    private fun mediaType(response: okhttp3.Response, uri: URI): String {
+        val mime = response.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase()
+            .ifBlank { "application/octet-stream" }
+        if (!response.isSuccessful) return mime
+        // Some servers resolve .ts/.key using document MIME tables. HLS
+        // segments may be encrypted, so their bytes cannot identify MPEG-TS.
+        if (mime in setOf("text/vnd.qt.linguist", "text/vnd.trolltech.linguist") &&
+            (uri.path.orEmpty().endsWith(".ts", true) || response.request.url.encodedPath.endsWith(".ts", true))) {
+            return "application/octet-stream"
+        }
+        if (mime == "application/vnd.apple.keynote") {
+            if (response.request.method == "HEAD") {
+                if (response.header("Content-Length")?.toLongOrNull() == 16L) return "application/octet-stream"
+            } else {
+                val body = response.body
+                if (body != null && body.contentLength() in -1L..16L) {
+                    val source = body.source()
+                    // Check a complete AES-128 key without consuming it or
+                    // buffering an arbitrary Keynote document.
+                    if (!source.request(17) && source.buffer.size == 16L) return "application/octet-stream"
+                }
+            }
+        }
+        return mime
     }
 
     private fun isMediaType(value: String): Boolean {
