@@ -12,7 +12,7 @@
             <TextView android:id="@+id/exitMessage" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp"
                 android:text="@string/exit_message" android:textColor="@color/muted" android:textSize="@dimen/ui_label_text" android:lineSpacingExtra="5dp" />
             <LinearLayout android:id="@+id/nextProfilePanel" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/ui_section_gap" android:orientation="vertical" android:background="@drawable/bg_config_secondary" android:padding="@dimen/ui_field_inset">
+                android:layout_marginTop="@dimen/ui_section_gap" android:orientation="vertical" android:background="@drawable/bg_config_soft" android:padding="@dimen/ui_field_inset">
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/exit_next_profile"
                     android:textColor="@color/muted" android:textSize="12sp" />
                 <TextView android:id="@+id/nextProfileName" android:layout_width="match_parent" android:layout_height="wrap_content"

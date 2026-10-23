@@ -29,7 +29,7 @@
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/ui_item_gap" android:gravity="center_vertical">
             <EditText android:id="@+id/logQuery" android:layout_width="0dp" android:layout_height="48dp"
-                android:layout_weight="1" android:background="@drawable/bg_input" android:paddingHorizontal="14dp"
+                android:layout_weight="1" android:background="@drawable/bg_input_surface" android:paddingHorizontal="14dp"
                 android:textSize="@dimen/ui_label_text" android:textColor="@color/ink" android:textColorHint="@color/muted"
                 android:hint="@string/logs_search_hint" android:inputType="text|textNoSuggestions"
                 android:singleLine="true" android:maxLength="200" android:imeOptions="actionSearch"

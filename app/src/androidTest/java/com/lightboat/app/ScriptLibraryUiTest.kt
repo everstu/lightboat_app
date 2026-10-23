@@ -342,7 +342,12 @@ class ScriptLibraryUiTest {
         capture("floating-profiles-expanded")
         waitFor {
             var collapsed = false
-            scenario.onActivity { collapsed = !it.findViewById<View>(R.id.addButton).isSelected }
+            scenario.onActivity {
+                val add = it.findViewById<View>(R.id.addButton)
+                // isSelected clears when the 160 ms collapse starts; tapping mid-animation can hit the shifting neighbour.
+                val resting = (48 * it.resources.displayMetrics.density + 0.5f).toInt()
+                collapsed = !add.isSelected && add.height == resting && !add.isLayoutRequested
+            }
             collapsed
         }
         tapFloatingAction(R.id.addButton)

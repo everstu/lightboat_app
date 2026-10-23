@@ -1,6 +1,7 @@
 package com.lightboat.app
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Typeface
 import android.text.SpannableString
 import android.text.Spanned
@@ -14,6 +15,16 @@ import androidx.appcompat.content.res.AppCompatResources
 import androidx.appcompat.widget.PopupMenu
 import androidx.recyclerview.widget.RecyclerView
 import com.lightboat.app.databinding.ItemProfileBinding
+
+/** Keeps a small icon beside its label in a stretched button; compound drawables pin it to the edge. */
+internal fun iconLabel(context: Context, label: Int, icon: Int): CharSequence {
+    val drawable = requireNotNull(AppCompatResources.getDrawable(context, icon))
+    val size = (16 * context.resources.displayMetrics.density).toInt()
+    drawable.setBounds(0, 0, size, size)
+    return SpannableString("\uFFFC  ${context.getString(label)}").apply {
+        setSpan(ImageSpan(drawable, ImageSpan.ALIGN_BOTTOM), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+}
 
 class ProfileAdapter(
     private val open: (Profile) -> Unit,
@@ -51,16 +62,8 @@ class ProfileAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
         val row = ItemProfileBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         row.root.clipToOutline = true
-        fun iconLabel(label: Int, icon: Int): CharSequence {
-            val drawable = requireNotNull(AppCompatResources.getDrawable(parent.context, icon))
-            val size = (16 * parent.resources.displayMetrics.density).toInt()
-            drawable.setBounds(0, 0, size, size)
-            return SpannableString("\uFFFC  ${parent.context.getString(label)}").apply {
-                setSpan(ImageSpan(drawable, ImageSpan.ALIGN_BOTTOM), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-        }
-        row.openProfile.text = iconLabel(R.string.switch_profile, R.drawable.ic_profile_open)
-        row.editProfile.text = iconLabel(R.string.edit, R.drawable.ic_profile_edit)
+        row.openProfile.text = iconLabel(parent.context, R.string.switch_profile, R.drawable.ic_profile_open)
+        row.editProfile.text = iconLabel(parent.context, R.string.edit, R.drawable.ic_profile_edit)
         return Holder(row)
     }
 

@@ -28,7 +28,7 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:backgroundDimEnabled">true</item>
-        <item name="android:backgroundDimAmount">0.38</item>
+        <item name="android:backgroundDimAmount">0.42</item>
         <item name="android:windowMinWidthMajor">0dp</item>
         <item name="android:windowMinWidthMinor">0dp</item>
     </style>
@@ -37,7 +37,7 @@
         <item name="android:fontFamily">sans</item>
         <item name="android:windowBackground">@drawable/bg_config_dialog</item>
         <item name="android:windowElevation">0dp</item>
-        <item name="android:backgroundDimAmount">0.38</item>
+        <item name="android:backgroundDimAmount">0.42</item>
         <item name="android:textColorPrimary">@color/ink</item>
         <item name="android:textColorSecondary">@color/muted</item>
         <item name="dialogPreferredPadding">@dimen/ui_page_inset</item>
@@ -69,6 +69,15 @@
         <item name="android:textSize">@dimen/ui_label_text</item>
         <item name="android:textStyle">bold</item>
     </style>
+    <!-- Group heading above a card: quieter than field labels so the hierarchy reads section > field. -->
+    <style name="SectionLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingHorizontal">4dp</item>
+        <item name="android:textColor">@color/muted</item>
+        <item name="android:textSize">@dimen/ui_label_text</item>
+        <item name="android:textStyle">bold</item>
+    </style>
     <style name="ConfigAction" parent="Widget.AppCompat.Button.Borderless">
         <item name="backgroundTint">@null</item>
         <item name="android:minHeight">@dimen/ui_touch_target</item>
@@ -86,6 +95,7 @@
     </style>
     <style name="ConfigSecondary" parent="ConfigAction">
         <item name="android:background">@drawable/bg_compact_action_secondary</item>
+        <item name="android:textColor">@color/on_accent_container</item>
     </style>
     <style name="CategoryDeleteAction" parent="ConfigAction">
         <item name="android:background">@drawable/bg_compact_action_delete</item>
@@ -119,12 +129,13 @@
         <item name="android:fontFamily">sans-serif-medium</item>
         <item name="android:stateListAnimator">@null</item>
     </style>
-    <style name="ProfileCardAction.Primary" parent="ProfileCardAction">
-        <item name="android:background">@drawable/bg_profile_action_primary</item>
-        <item name="android:textColor">@color/white</item>
-    </style>
     <style name="ProfileCardAction.Secondary" parent="ProfileCardAction">
         <item name="android:background">@drawable/bg_profile_action_secondary</item>
+        <item name="android:textColor">@color/on_accent_container</item>
+    </style>
+    <style name="ProfileCardAction.Outline" parent="ProfileCardAction">
+        <item name="android:background">@drawable/bg_profile_action_outline</item>
+        <item name="android:textColor">@color/ink</item>
     </style>
     <style name="BrowserMenuAction" parent="ConfigSecondary">
         <item name="android:layout_height">48dp</item>
@@ -138,6 +149,7 @@
         <item name="android:includeFontPadding">false</item>
         <item name="android:stateListAnimator">@null</item>
         <item name="android:background">@drawable/bg_browser_menu_secondary</item>
+        <item name="android:textColor">@color/on_accent_container</item>
     </style>
     <style name="BrowserMenuAction.Primary" parent="BrowserMenuAction">
         <item name="android:background">@drawable/bg_browser_menu_primary</item>
@@ -157,6 +169,8 @@
         <item name="android:gravity">start|center_vertical</item>
         <item name="android:paddingStart">14dp</item>
         <item name="android:paddingEnd">12dp</item>
+        <item name="android:background">@drawable/bg_dropdown</item>
+        <item name="android:textColor">@color/ink</item>
         <item name="android:drawableEnd">@drawable/ic_expand</item>
         <item name="android:drawablePadding">8dp</item>
     </style>

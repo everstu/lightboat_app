@@ -196,6 +196,8 @@ class MainActivity : AppCompatActivity() {
         binding.edgeMenuButton.setOnClickListener { showBrowserMenu() }
         binding.scanWebsiteButton.setOnClickListener { startScan(ScanTarget.WEBSITE) }
         binding.scanScriptButton.setOnClickListener { startScan(ScanTarget.SCRIPT) }
+        binding.chooseScripts.text = iconLabel(this, R.string.script_select, R.drawable.ic_scripts)
+        binding.addScript.text = iconLabel(this, R.string.script_add_address, R.drawable.ic_add_compact)
         binding.chooseScripts.setOnClickListener { chooseScripts() }
         binding.addScript.setOnClickListener { addDraftScript() }
         binding.scriptLibrary.setOnClickListener { showScriptLibrary() }
@@ -247,6 +249,8 @@ class MainActivity : AppCompatActivity() {
         binding.saveOpenButton.setOnClickListener { saveEditor(true) }
         binding.cancelButton.setOnClickListener { showProfiles() }
         binding.returnButton.setOnClickListener { leaveProfileManager() }
+        binding.importButton.text = iconLabel(this, R.string.import_config, R.drawable.ic_import)
+        binding.exportButton.text = iconLabel(this, R.string.export_config, R.drawable.ic_export)
         binding.importButton.setOnClickListener { showConfigImport() }
         binding.exportButton.setOnClickListener {
             commitProfileOrder()

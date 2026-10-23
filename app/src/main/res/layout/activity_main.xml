@@ -50,23 +50,24 @@
                     <TextView android:id="@+id/configDescription" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:layout_marginTop="8dp" android:layout_marginBottom="@dimen/ui_section_gap"
                         android:text="@string/setup_description" android:textColor="@color/muted" android:textSize="@dimen/ui_label_text" android:lineSpacingExtra="4dp" />
-                    <TextView style="@style/FieldLabel" android:text="@string/profile_basics" android:layout_marginBottom="@dimen/ui_item_gap" />
+                    <TextView style="@style/SectionLabel" android:text="@string/profile_basics" android:layout_marginBottom="@dimen/ui_item_gap" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="@dimen/ui_field_inset">
+                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="14dp">
                         <TextView style="@style/FieldLabel" android:text="@string/profile_name" android:labelFor="@id/nameInput" />
                         <EditText android:id="@+id/nameInput" style="@style/UrlField" android:inputType="textCapSentences"
                             android:hint="@string/profile_name_hint" android:maxLength="60" android:imeOptions="actionNext" />
                         <TextView style="@style/FieldLabel" android:layout_marginTop="@dimen/ui_section_gap"
                             android:text="@string/category_label" android:labelFor="@id/categoryInput" />
                         <LinearLayout android:id="@+id/categoryField" android:layout_width="match_parent" android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp" android:gravity="center_vertical" android:background="@drawable/bg_input">
+                            android:layout_marginTop="6dp" android:gravity="center_vertical" android:background="@drawable/bg_input"
+                            android:addStatesFromChildren="true">
                             <androidx.appcompat.widget.AppCompatEditText android:id="@+id/categoryInput" style="@style/UrlField"
                                 android:layout_width="0dp" android:layout_weight="1" android:layout_marginTop="0dp"
                                 android:background="@null" android:paddingStart="@dimen/ui_field_inset" android:paddingEnd="4dp"
                                 android:inputType="textCapSentences" android:maxLength="60"
                                 android:hint="@string/category_hint" android:imeOptions="actionNext" />
                             <ImageButton android:id="@+id/clearCategory" android:layout_width="48dp" android:layout_height="48dp"
-                                android:src="@drawable/ic_close" android:contentDescription="@string/category_clear"
+                                android:src="@drawable/ic_close" app:tint="@color/muted" android:contentDescription="@string/category_clear"
                                 android:background="?attr/selectableItemBackgroundBorderless" android:visibility="gone" />
                             <ImageButton android:id="@+id/chooseCategory" android:layout_width="48dp" android:layout_height="48dp"
                                 android:src="@drawable/ic_expand" android:contentDescription="@string/category_choose"
@@ -86,10 +87,10 @@
                         <EditText android:id="@+id/websiteInput" style="@style/UrlField" android:layout_marginTop="0dp"
                             android:hint="@string/website_hint" android:imeOptions="actionNext" />
                     </LinearLayout>
-                    <TextView style="@style/FieldLabel" android:layout_marginTop="@dimen/ui_section_gap" android:layout_marginBottom="@dimen/ui_item_gap"
+                    <TextView style="@style/SectionLabel" android:layout_marginTop="@dimen/ui_page_inset" android:layout_marginBottom="@dimen/ui_item_gap"
                         android:text="@string/script_injection_title" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
-                        android:background="@drawable/bg_profile" android:padding="12dp">
+                        android:background="@drawable/bg_profile" android:padding="14dp">
                         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:paddingHorizontal="4dp" android:gravity="center_vertical">
                             <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
@@ -103,8 +104,8 @@
                         <LinearLayout android:id="@+id/selectedScripts" android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:orientation="vertical" android:layout_marginTop="@dimen/ui_item_gap" />
                         <Button android:id="@+id/chooseScripts" style="@style/ConfigSecondary" android:layout_width="match_parent"
-                            android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginTop="4dp" android:drawableStart="@drawable/ic_scripts"
-                            android:drawablePadding="8dp" android:text="@string/script_select" />
+                            android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginTop="4dp"
+                            android:text="@string/script_select" android:contentDescription="@string/script_select" />
                         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:layout_marginTop="@dimen/ui_item_gap" android:gravity="center_vertical">
                             <TextView style="@style/FieldLabel" android:layout_width="0dp" android:layout_weight="1"
@@ -117,16 +118,16 @@
                             android:hint="@string/script_hint" android:imeOptions="actionDone" />
                         <Button android:id="@+id/addScript" style="@style/ConfigPrimary" android:layout_width="match_parent"
                             android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target"
-                            android:layout_marginTop="@dimen/ui_item_gap" android:drawableStart="@drawable/ic_add_compact"
-                            android:drawablePadding="@dimen/ui_item_gap" android:text="@string/script_add_address" />
+                            android:layout_marginTop="@dimen/ui_item_gap"
+                            android:text="@string/script_add_address" android:contentDescription="@string/script_add_address" />
                         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:layout_marginTop="10dp" android:text="@string/script_help"
                             android:textColor="@color/muted" android:textSize="12sp" android:lineSpacingExtra="3dp" />
                     </LinearLayout>
-                    <TextView style="@style/FieldLabel" android:layout_marginTop="@dimen/ui_section_gap" android:layout_marginBottom="@dimen/ui_item_gap"
+                    <TextView style="@style/SectionLabel" android:layout_marginTop="@dimen/ui_page_inset" android:layout_marginBottom="@dimen/ui_item_gap"
                         android:text="@string/profile_access" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="@dimen/ui_field_inset">
+                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="14dp">
                         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:text="@string/platform_help" android:textColor="@color/muted" android:textSize="13sp" android:lineSpacingExtra="3dp" />
                         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_item_gap">
@@ -146,10 +147,10 @@
                         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
                             android:layout_marginTop="10dp" android:text="@string/profile_ua_hint" android:textSize="12sp" android:textColor="@color/muted" />
                     </LinearLayout>
-                    <TextView style="@style/FieldLabel" android:layout_marginTop="@dimen/ui_section_gap" android:layout_marginBottom="@dimen/ui_item_gap"
+                    <TextView style="@style/SectionLabel" android:layout_marginTop="@dimen/ui_page_inset" android:layout_marginBottom="@dimen/ui_item_gap"
                         android:text="@string/profile_note_label" android:labelFor="@id/noteInput" />
                     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="@dimen/ui_field_inset">
+                        android:orientation="vertical" android:background="@drawable/bg_profile" android:padding="14dp">
                         <EditText android:id="@+id/noteInput" style="@style/NoteField" android:layout_marginTop="0dp"
                             android:hint="@string/profile_note_hint" />
                         <TextView android:id="@+id/noteCounter" android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -160,7 +161,7 @@
                 </LinearLayout>
             </ScrollView>
             <View android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/line" />
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@color/white"
                 android:orientation="vertical" android:paddingHorizontal="@dimen/ui_page_inset" android:paddingVertical="@dimen/ui_item_gap">
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="10dp"
                     android:text="@string/setup_note" android:textSize="12sp" android:textColor="@color/muted" />
@@ -178,19 +179,20 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
                 android:orientation="vertical" android:paddingTop="@dimen/ui_item_gap">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:paddingStart="@dimen/ui_page_inset" android:paddingEnd="12dp" android:gravity="center_vertical">
-                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-                        android:text="@string/profiles_title" android:textColor="@color/ink" android:textSize="@dimen/ui_page_title" android:textStyle="bold"
-                        android:maxLines="1" android:ellipsize="end" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="18sp" android:autoSizeMaxTextSize="@dimen/ui_page_title" />
-                    <ImageButton android:id="@+id/webDavButton" android:layout_width="48dp" android:layout_height="48dp"
-                        android:src="@drawable/ic_cloud_backup" android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/webdav_entry" />
-                    <Button android:id="@+id/renameCategories" style="@style/ConfigAction" android:layout_width="wrap_content"
-                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:minWidth="0dp" android:paddingHorizontal="8dp" android:textSize="13sp"
-                        android:text="@string/category_rename_action" android:visibility="gone" />
+                    android:paddingHorizontal="12dp" android:gravity="center_vertical">
                     <ImageButton android:id="@+id/returnButton" android:layout_width="48dp" android:layout_height="48dp"
                         android:src="@drawable/ic_back" android:contentDescription="@string/profiles_back"
                         android:background="?attr/selectableItemBackgroundBorderless" />
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="@string/profiles_title" android:textColor="@color/ink" android:textSize="@dimen/ui_page_title" android:textStyle="bold"
+                        android:maxLines="1" android:ellipsize="end" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="18sp" android:autoSizeMaxTextSize="@dimen/ui_page_title" />
+                    <Button android:id="@+id/renameCategories" style="@style/ConfigAction" android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:minWidth="0dp" android:paddingHorizontal="8dp" android:textSize="13sp"
+                        android:text="@string/category_rename_action" android:visibility="gone" />
+                    <ImageButton android:id="@+id/webDavButton" android:layout_width="48dp" android:layout_height="48dp"
+                        android:src="@drawable/ic_cloud_backup" android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/webdav_entry" android:tooltipText="@string/webdav_entry" />
                 </LinearLayout>
                 <TextView android:id="@+id/profilesNote" android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:paddingHorizontal="@dimen/ui_page_inset" android:layout_marginTop="4dp" android:text="@string/profiles_note"
@@ -198,10 +200,10 @@
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:paddingHorizontal="@dimen/ui_page_inset" android:layout_marginTop="@dimen/ui_section_gap">
                     <Button android:id="@+id/importButton" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:drawableStart="@drawable/ic_import" android:drawablePadding="8dp" android:text="@string/import_config" />
+                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:text="@string/import_config" android:contentDescription="@string/import_config" />
                     <Button android:id="@+id/exportButton" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
-                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginStart="@dimen/ui_item_gap" android:drawableStart="@drawable/ic_export"
-                        android:drawablePadding="8dp" android:text="@string/export_config" />
+                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginStart="@dimen/ui_item_gap"
+                        android:text="@string/export_config" android:contentDescription="@string/export_config" />
                 </LinearLayout>
                 <LinearLayout android:id="@+id/profileFilters" android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/ui_section_gap" android:paddingHorizontal="@dimen/ui_page_inset" android:gravity="center_vertical">

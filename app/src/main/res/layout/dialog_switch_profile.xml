@@ -18,8 +18,8 @@
             android:contentDescription="@string/close_profile_switch" />
     </LinearLayout>
     <LinearLayout android:id="@+id/searchPanel" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginHorizontal="@dimen/ui_section_gap" android:layout_marginTop="@dimen/ui_item_gap" android:background="@drawable/bg_config_secondary"
-        android:gravity="center_vertical" android:paddingStart="14dp" android:paddingEnd="0dp">
+        android:layout_marginHorizontal="@dimen/ui_page_inset" android:layout_marginTop="@dimen/ui_item_gap" android:background="@drawable/bg_input"
+        android:addStatesFromChildren="true" android:gravity="center_vertical" android:paddingStart="14dp" android:paddingEnd="0dp">
         <ImageView android:layout_width="20dp" android:layout_height="20dp" android:src="@drawable/ic_search"
             android:importantForAccessibility="no" />
         <EditText android:id="@+id/searchProfiles" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
