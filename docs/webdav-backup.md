@@ -25,7 +25,7 @@
 
 | 包含 | 不包含 |
 | --- | --- |
-| 所有配置、分类、收藏、排序、上次使用项、UA/平台 | 网页 Cookie、登录态、localStorage、IndexedDB、Cloudflare 验证结果 |
+| 所有配置、分类、收藏、排序、默认配置、UA/平台 | 网页 Cookie、登录态、localStorage、IndexedDB、Cloudflare 验证结果 |
 | 共享脚本库、脚本引用 ID、顺序与启用开关 | 下载的脚本源码、require/resource 文件版本 |
 | GM 持久值，包括脚本设置、自定义规则及其规则缓存 | 当前页面、播放进度/运行中的 JS 内存、未完成的 GM 分片 |
 | 分类筛选和收藏筛选偏好 | WebDAV 账号密码、调试日志、损坏存储副本、网络/页面缓存 |

@@ -5,6 +5,7 @@ import android.graphics.RectF
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.TextView
 import android.widget.ImageView
 import androidx.recyclerview.widget.RecyclerView
@@ -69,7 +70,7 @@ class ProfileCardUiTest {
             val row = (list(activity).findViewHolderForAdapterPosition(0) as ProfileAdapter.Holder).binding
             assertEquals("脚本：1/1", row.profileScript.text.toString())
             assertEquals("已启用", row.profileScriptStatus.text.toString())
-            assertEquals("使用中", row.profileState.text.toString())
+            assertEquals("默认", row.profileState.text.toString())
             assertTrue(row.root.isActivated)
             assertTrue(row.profileState.isShown)
             assertFalse(row.profileState.isClickable)
@@ -98,6 +99,76 @@ class ProfileCardUiTest {
         scenario!!.onActivity { it.findViewById<View>(R.id.cancelButton).performClick() }
         tap(R.id.openProfile)
         waitFor { var shown = false; scenario!!.onActivity { shown = it.findViewById<View>(R.id.menuLayer).isShown }; shown }
+    }
+    @Test fun moreMenuSetsTheStartupDefaultAndOpeningAnotherProfileKeepsIt() {
+        tap(R.id.profileMore, 1)
+        clickMenuItem("设为默认")
+        waitFor { load().defaultProfileId == "disabled" }
+        instrumentation.waitForIdleSync()
+        scenario!!.onActivity { activity ->
+            val open = (list(activity).findViewHolderForAdapterPosition(0) as ProfileAdapter.Holder).binding
+            val chosen = (list(activity).findViewHolderForAdapterPosition(1) as ProfileAdapter.Holder).binding
+            assertEquals(View.GONE, open.profileState.visibility)
+            assertTrue("The open profile lost its highlight", open.root.isActivated)
+            assertEquals("默认", chosen.profileState.text.toString())
+            assertTrue(chosen.profileState.isShown)
+            assertFalse(chosen.root.isActivated)
+        }
+        assertEquals(listOf("active", "disabled", "plain"), load().profiles.map { it.id })
+        // The default card does not offer the action again.
+        tap(R.id.profileMore, 1)
+        waitFor { menuNode("查看备注") != null }
+        assertNull(menuNode("设为默认"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        // Opening a non-default profile does not move the default.
+        tap(R.id.openProfile, 0)
+        waitFor { browsing() == "active" }
+        assertEquals("disabled", load().defaultProfileId)
+        // Recreation resumes the profile in use; only a cold start opens the default.
+        scenario!!.recreate()
+        waitFor { browsing() == "active" }
+        assertEquals("disabled", load().defaultProfileId)
+        scenario!!.close()
+        scenario = launchConfiguredActivity()
+        waitFor { browsing() == "disabled" }
+    }
+    @Test fun switchDialogShowsTheDefaultTagInTheTopRightCornerLikeTheManagerCard() {
+        tap(R.id.favoriteProfile)
+        waitFor { load().profiles.first().favorite }
+        scenario!!.onActivity { MainActivity::class.java.getDeclaredMethod("showProfilePicker").apply { isAccessible = true }.invoke(it) }
+        waitFor { var ready = false; scenario!!.onActivity { ready = switchRow(it, 0) != null && switchRow(it, 1) != null }; ready }
+        instrumentation.waitForIdleSync()
+        scenario!!.onActivity { activity ->
+            val density = activity.resources.displayMetrics.density
+            val row = switchRow(activity, 0)!!
+            val tag = row.findViewById<TextView>(R.id.profileState)
+            assertEquals("默认", tag.text.toString())
+            assertTrue(tag.isShown)
+            assertTrue("The favorited default row lost its star", row.findViewById<View>(R.id.profileFavorite).isShown)
+            assertEquals(View.GONE, switchRow(activity, 1)!!.findViewById<View>(R.id.profileState).visibility)
+            val marginEnd = (tag.layoutParams as android.view.ViewGroup.MarginLayoutParams).marginEnd
+            assertEquals("Tag is not 7dp from the right edge", 7 * density, marginEnd.toFloat(), 1f)
+            assertEquals("Tag is not right-aligned", row.width - marginEnd, tag.right)
+            assertTrue("Tag is not at the top edge: ${tag.top}", tag.top <= kotlin.math.ceil(density).toInt())
+            // Same appearance as the manager card's tag.
+            val card = (list(activity).findViewHolderForAdapterPosition(0) as ProfileAdapter.Holder).binding.profileState
+            assertEquals(card.text.toString(), tag.text.toString())
+            assertEquals(card.background.alpha, tag.background.alpha)
+            assertEquals(card.currentTextColor, tag.currentTextColor)
+            assertEquals(card.textSize, tag.textSize, 0.5f)
+            assertEquals(card.height, tag.height)
+            assertEquals(card.width, tag.width)
+            val tagBounds = Rect(tag.left, tag.top, tag.right, tag.bottom)
+            listOf(R.id.profileName, R.id.profileHost, R.id.profilePlatform, R.id.profileFavorite, R.id.profileIndicator).forEach { id ->
+                val child = row.findViewById<View>(id)
+                if (!child.isShown) return@forEach
+                // Padding is excluded: a long name may only use the area left of the tag.
+                val bounds = Rect(child.paddingLeft, 0, child.width - child.paddingRight, child.height)
+                    .also { (row as android.view.ViewGroup).offsetDescendantRectToMyCoords(child, it) }
+                assertFalse("Tag overlaps ${activity.resources.getResourceEntryName(id)}", Rect.intersects(bounds, tagBounds))
+            }
+        }
+        captureScreen("profile-switch-default-tag")
     }
     @Test fun recycledCardsClearOldRibbonIconsAndEnabledCounts() {
         scenario!!.onActivity { activity ->
@@ -164,7 +235,7 @@ class ProfileCardUiTest {
                         assertToolbarRightAligned(row)
                         val heightWithTag = row.root.height
                         val boundsWithTag = contentBounds()
-                        adapter.submit(config.copy(lastProfileId = null), null)
+                        adapter.submit(config.copy(defaultProfileId = null), null)
                         adapter.bindViewHolder(holder, position)
                         measureCard()
                         assertEquals("Status tag changed card height", heightWithTag, row.root.height)
@@ -205,18 +276,40 @@ class ProfileCardUiTest {
         }
     }
     private fun list(activity: MainActivity) = activity.findViewById<RecyclerView>(R.id.profilesList)
-    private fun tap(id: Int) {
+    private fun switchRow(activity: MainActivity, position: Int): View? {
+        val dialog = MainActivity::class.java.getDeclaredField("nativeDialog").apply { isAccessible = true }.get(activity) as? android.app.Dialog
+        return dialog?.findViewById<RecyclerView>(R.id.switchList)?.findViewHolderForAdapterPosition(position)?.itemView
+    }
+    private fun load() = ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load()
+    /** Profile shown in the browser, or null while another screen is visible. */
+    private fun browsing(): String? {
+        var id: String? = null
+        scenario!!.onActivity { activity ->
+            if (activity.findViewById<View>(R.id.menuLayer).isShown) id = MainActivity::class.java.getDeclaredField("currentId")
+                .apply { isAccessible = true }.get(activity) as String?
+        }
+        return id
+    }
+    private fun menuNode(text: String) = instrumentation.uiAutomation.rootInActiveWindow
+        ?.findAccessibilityNodeInfosByText(text)?.firstOrNull { it.text?.toString() == text && it.isVisibleToUser }
+    private fun clickMenuItem(text: String) {
+        waitFor { menuNode(text) != null }
+        var node = menuNode(text)
+        while (node != null && !node.isClickable) node = node.parent
+        assertTrue("Menu item is not clickable: $text", node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+    }
+    private fun tap(id: Int, row: Int = 0) {
         var x = 0f; var y = 0f
         instrumentation.waitForIdleSync()
         scenario!!.onActivity { activity ->
-            val view = list(activity).findViewHolderForAdapterPosition(0)!!.itemView.findViewById<View>(id)
+            val view = list(activity).findViewHolderForAdapterPosition(row)!!.itemView.findViewById<View>(id)
             view.requestRectangleOnScreen(Rect(0, 0, view.width, view.height), true)
         }
         instrumentation.waitForIdleSync()
         waitFor {
             var visible = false
             scenario!!.onActivity { activity ->
-                val view = list(activity).findViewHolderForAdapterPosition(0)?.itemView?.findViewById<View>(id)
+                val view = list(activity).findViewHolderForAdapterPosition(row)?.itemView?.findViewById<View>(id)
                 if (view != null) {
                     val bounds = Rect()
                     visible = view.getGlobalVisibleRect(bounds) && bounds.height() >= view.height - 1
@@ -225,7 +318,7 @@ class ProfileCardUiTest {
             visible
         }
         scenario!!.onActivity { activity ->
-            val view = list(activity).findViewHolderForAdapterPosition(0)!!.itemView.findViewById<View>(id)
+            val view = list(activity).findViewHolderForAdapterPosition(row)!!.itemView.findViewById<View>(id)
             val position = IntArray(2).also(view::getLocationOnScreen)
             x = position[0] + view.width / 2f; y = position[1] + view.height / 2f
         }

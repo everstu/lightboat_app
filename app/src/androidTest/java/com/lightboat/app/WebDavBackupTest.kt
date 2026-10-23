@@ -111,6 +111,9 @@ class WebDavBackupTest {
         .upsert(Profile(profileId, "设备一的配置", "$base/page", listOf(ProfileScript(scriptId, false)),
             categoryId = "saved-category", favorite = true))
     private fun configB() = AppConfig.EMPTY.upsert(Profile("second-profile", "设备二的配置", "$base/page"))
+    /** A default that differs from the first profile proves backups keep the explicit choice. */
+    private fun configWithDefault() = configA().upsert(Profile("default-profile", "设备一的默认配置", "$base/page"))
+        .setDefault("default-profile")
 
     @Before fun setUp() {
         savedConfig = File(root, "config.json").takeIf(File::exists)?.readBytes()
@@ -142,7 +145,7 @@ class WebDavBackupTest {
     }
 
     @Test fun fullBackupRestoresIdsGmRulesAndPreferencesWithoutCreatingALocalUndoBackup() {
-        val original = configA()
+        val original = configWithDefault()
         ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(original)
         ScriptStorage.exclusive { ScriptValueStore(context, identity).update("rules", encoded("规则正文".repeat(180_000))) }
         context.getSharedPreferences("profile_ui", 0).edit().putString("categoryId", "saved-category").putBoolean("favoritesOnly", true).commit()
@@ -165,9 +168,14 @@ class WebDavBackupTest {
         launchManager(); openDialog()
         click(R.id.downloadWebdav); waitPreview()
         assertEquals(second, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load())
+        scenario!!.onActivity { activity ->
+            val preview = dialog(activity).findViewById<TextView>(R.id.webdavPreviewDetails)!!.text.toString()
+            assertTrue(preview, preview.contains("默认配置：设备一的默认配置"))
+        }
         capture("webdav-restore-preview")
         click(R.id.webdavConfirm); waitText("恢复完成")
         assertEquals(original, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load())
+        assertEquals("default-profile", ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load().defaultProfileId)
         assertTrue(context.getSharedPreferences("profile_ui", 0).getBoolean("favoritesOnly", false))
         assertEquals("saved-category", context.getSharedPreferences("profile_ui", 0).getString("categoryId", null))
         assertFalse(File(values, secondName).exists())
@@ -385,7 +393,7 @@ class WebDavBackupTest {
     }
 
     @Test fun localExportAndImportUseTheSameZipAndRestoreOnlyTheSelectedComponents() {
-        val original = configA()
+        val original = configWithDefault()
         ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).save(original)
         ScriptStorage.exclusive { ScriptValueStore(context, identity).update("owner", encoded("exported-A")) }
         context.getSharedPreferences("profile_ui", 0).edit().putBoolean("favoritesOnly", true).commit()
@@ -412,11 +420,14 @@ class WebDavBackupTest {
             val options = dialog(activity).findViewById<BackupOptionsView>(R.id.importBackupOptions)!!
             assertEquals(BackupOptions.ALL, options.options)
             options.options = BackupOptions.CONFIG_ONLY
+            val preview = dialog(activity).findViewById<TextView>(R.id.importFeedback)!!.text.toString()
+            assertTrue(preview, preview.contains("默认配置：设备一的默认配置"))
         }
         capture("local-backup-import")
         click(R.id.importAction)
         waitFor { var restored = false; scenario!!.onActivity { activity -> restored = MainActivity::class.java.getDeclaredField("nativeDialog").apply { isAccessible = true }.get(activity) == null }; restored }
         assertEquals(original, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load())
+        assertEquals("default-profile", ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load().defaultProfileId)
         assertEquals("local-B", JSONObject(File(values, secondName).readText()).getJSONObject("owner").getString("value"))
         assertFalse(context.getSharedPreferences("profile_ui", 0).getBoolean("favoritesOnly", true))
         assertFalse(local.exists())

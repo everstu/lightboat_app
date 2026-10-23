@@ -120,7 +120,7 @@ class CategoryManagementUiTest {
         assertNull(saved.profiles.first { it.id == "normal" }.categoryId)
         assertNull(saved.profiles.first { it.id == "other" }.categoryId)
         assertTrue(saved.profiles.first { it.id == "favorite" }.favorite)
-        assertEquals("favorite", saved.lastProfileId)
+        assertEquals("favorite", saved.defaultProfileId)
         // Favorites filtering survives; the deleted category selection becomes "all".
         assertNull(preferences.getString("categoryId", null))
         assertTrue(preferences.getBoolean("favoritesOnly", false))
@@ -164,7 +164,7 @@ class CategoryManagementUiTest {
         assertEquals(2, saved.profiles.size)
         assertEquals(listOf("配置一", "配置二"), saved.profiles.map { it.name })
         assertTrue(saved.profiles.all { it.categoryId == null })
-        assertEquals("one", saved.lastProfileId)
+        assertEquals("one", saved.defaultProfileId)
         scenario!!.onActivity { activity ->
             assertEquals(View.GONE, activity.findViewById<View>(R.id.renameCategories).visibility)
             assertEquals(2, activity.findViewById<RecyclerView>(R.id.profilesList).adapter!!.itemCount)

@@ -17,7 +17,7 @@ class ScriptLibraryTest {
         assertEquals(config.profiles, changed.profiles)
         assertEquals(listOf("https://new.example/ad.js"), changed.activeScripts(changed.profiles[0]).map { it.url })
         assertEquals(changed.activeScripts(changed.profiles[0]), changed.activeScripts(changed.profiles[1]))
-        assertEquals(config.lastProfileId, changed.lastProfileId)
+        assertEquals(config.defaultProfileId, changed.defaultProfileId)
         assertEquals(changed, ConfigCodec.decode(ConfigCodec.encode(changed)))
     }
 
@@ -48,7 +48,7 @@ class ScriptLibraryTest {
         assertEquals(listOf(second), removed.scriptLibrary)
         assertEquals(listOf(ProfileScript("b", false)), removed.profiles[0].scripts)
         assertTrue(removed.profiles[1].scripts.isEmpty())
-        assertEquals(config.lastProfileId, removed.lastProfileId)
+        assertEquals(config.defaultProfileId, removed.defaultProfileId)
         assertEquals(config.profiles.map { it.id }, removed.profiles.map { it.id })
         assertEquals(removed, ConfigCodec.decode(ConfigCodec.encode(removed)))
     }

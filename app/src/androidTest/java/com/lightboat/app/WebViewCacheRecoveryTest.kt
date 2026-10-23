@@ -187,10 +187,10 @@ class WebViewCacheRecoveryTest {
         scenario!!.onActivity { activity ->
             val live = MainActivity::class.java.getDeclaredField("config")
                 .apply { isAccessible = true }.get(activity) as AppConfig
-            assertEquals(profileId, live.lastProfileId)
+            assertEquals(profileId, live.defaultProfileId)
         }
         assertEquals("The failed profile was removed from the saved configuration",
-            profileId, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load().lastProfileId)
+            profileId, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load().defaultProfileId)
 
         verifySecondOriginCacheWasCleared()
     }
@@ -316,7 +316,8 @@ class WebViewCacheRecoveryTest {
         assertTrue("The second origin did not load for the verification", loadTemporary("$baseB/warm?run=$runId&verify=b"))
         SystemClock.sleep(500)
         assertEquals("The switched profile lost its cached resource", before, cachedImageRequests())
-        assertEquals(profileB.id, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load().lastProfileId)
+        assertEquals("Switching profiles changed the startup default",
+            profileA.id, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load().defaultProfileId)
     }
 
     @Test fun retryingAfterAScriptFailureKeepsThePendingCacheClearForExactlyOneRun() {

@@ -18,13 +18,13 @@ class ProfileOrganizationTest {
         val legacy = """{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"旧配置","url":"https://example.com"}]}"""
         val config = ConfigCodec.decode(legacy)
         assertTrue(config.categories.isEmpty())
-        assertNull(config.lastProfile?.categoryId)
-        assertFalse(config.lastProfile!!.favorite)
+        assertNull(config.defaultProfile?.categoryId)
+        assertFalse(config.defaultProfile!!.favorite)
     }
 
     @Test fun inlineCategoryCreationUsesAnIndependentIdAndReusesExistingNames() {
         val first = AppConfig.EMPTY.upsert(profile("a"), "  Work  ")
-        val id = first.lastProfile!!.categoryId!!
+        val id = first.defaultProfile!!.categoryId!!
         assertEquals(id, UUID.fromString(id).toString())
         assertNotEquals("Work", id)
         assertEquals(mapOf(id to "Work"), first.categories)
@@ -44,7 +44,7 @@ class ProfileOrganizationTest {
         assertNull(cleared.profiles.first().categoryId)
         assertTrue(cleared.profiles.first().favorite)
         assertEquals(moved.categories, cleared.categories)
-        assertEquals(grouped.lastProfileId, cleared.lastProfileId)
+        assertEquals(grouped.defaultProfileId, cleared.defaultProfileId)
     }
 
     @Test fun exportKeepsTheCategoryMapFavoritesGlobalOrderAndSelection() {
@@ -76,7 +76,7 @@ class ProfileOrganizationTest {
         assertEquals(grouped.profiles[1], next.profiles[1])
         assertEquals(grouped.profiles[3], next.profiles[3])
         assertEquals(grouped.profiles[4], next.profiles[4])
-        assertEquals(grouped.lastProfileId, next.lastProfileId)
+        assertEquals(grouped.defaultProfileId, next.defaultProfileId)
         assertEquals(grouped.categories, next.categories)
         assertEquals(next, ConfigCodec.decode(ConfigCodec.encode(next)))
         listOf(listOf("a"), listOf("c", "c"), listOf("a", "b"), listOf("a", "missing")).forEach {
@@ -91,20 +91,20 @@ class ProfileOrganizationTest {
         assertEquals(grouped, favorite.toggleFavorite("b"))
         val top = favorite.moveToTop("c")
         assertEquals(listOf("c", "a", "b", "d", "e"), top.profiles.map { it.id })
-        assertEquals("b", top.lastProfileId)
+        assertEquals("b", top.defaultProfileId)
         assertEquals(favorite.categories, top.categories)
         assertEquals(top, top.moveToTop("c"))
         assertEquals("a", top.reorder(listOf("a", "b", "c", "d", "e")).profiles.first().id)
     }
 
     @Test fun selectingEditingRemovingAndClearingAllRetainTheCategoryRegistry() {
-        val edited = grouped.select("e").upsert(grouped.profiles[0].copy(name = "新名称"))
+        val edited = grouped.setDefault("e").upsert(grouped.profiles[0].copy(name = "新名称"))
         assertEquals(grouped.categories, edited.categories)
         assertTrue(edited.profiles.first().favorite)
         var cleared = edited
         grouped.profiles.forEach { cleared = cleared.remove(it.id) }
         assertTrue(cleared.profiles.isEmpty())
-        assertNull(cleared.lastProfileId)
+        assertNull(cleared.defaultProfileId)
         assertEquals(grouped.categories, cleared.categories)
         assertEquals(cleared, ConfigCodec.decode(ConfigCodec.encode(cleared)))
     }
@@ -153,7 +153,7 @@ class ProfileOrganizationTest {
         assertEquals(grouped.categories.keys.toList(), next.categories.keys.toList())
         assertEquals("娱乐", next.categories["play"])
         assertEquals(grouped.profiles, next.profiles)
-        assertEquals(grouped.lastProfileId, next.lastProfileId)
+        assertEquals(grouped.defaultProfileId, next.defaultProfileId)
         assertEquals(ProfileFilter("work"), ProfileFilter("work").resolve(next))
         assertEquals(listOf("a", "c", "d"), ProfileFilter("work").apply(next).map { it.id })
         assertEquals(next, ConfigCodec.decode(ConfigCodec.encode(next)))
@@ -186,7 +186,7 @@ class ProfileOrganizationTest {
 
         val top = reordered.moveToTop("c")
         assertEquals(notes.getValue("c"), top.profiles.first().note)
-        assertEquals(reordered.lastProfileId, top.lastProfileId)
+        assertEquals(reordered.defaultProfileId, top.defaultProfileId)
 
         val withScript = top.upsertScript(SharedScript("shared", "脚本", "https://scripts.example/a.js"))
         assertTrue(withScript.profiles.all { it.note == notes.getValue(it.id) })
@@ -203,7 +203,7 @@ class ProfileOrganizationTest {
         val next = grouped.removeCategory("work")
         assertEquals(mapOf("play" to "娱乐"), next.categories)
         assertEquals(listOf("a", "b", "c", "d", "e"), next.profiles.map { it.id })
-        assertEquals("b", next.lastProfileId)
+        assertEquals("b", next.defaultProfileId)
         assertNull(next.profiles.first { it.id == "a" }.categoryId)
         assertNull(next.profiles.first { it.id == "c" }.categoryId)
         assertNull(next.profiles.first { it.id == "d" }.categoryId)
@@ -225,7 +225,7 @@ class ProfileOrganizationTest {
         assertTrue(root.getJSONArray("profiles").getJSONObject(0).isNull("categoryId"))
         assertEquals(next, ConfigCodec.decode(ConfigCodec.encode(next)))
         assertEquals(5, next.profiles.size)
-        assertEquals(grouped.lastProfileId, next.lastProfileId)
+        assertEquals(grouped.defaultProfileId, next.defaultProfileId)
         // Filtering resolves a deleted category to "all categories" while keeping favorites.
         assertEquals(ProfileFilter(favoritesOnly = true), ProfileFilter("work", true).resolve(next))
         assertEquals(ProfileFilter("play", true), ProfileFilter("play", true).resolve(next))
@@ -240,7 +240,7 @@ class ProfileOrganizationTest {
         assertEquals(2, next.profiles.size)
         assertNull(next.profiles.first().categoryId)
         assertTrue(next.profiles.first().favorite)
-        assertEquals("a", next.lastProfileId)
+        assertEquals("a", next.defaultProfileId)
         assertEquals(next, ConfigCodec.decode(ConfigCodec.encode(next)))
         // Re-entering the deleted name later creates a fresh ID instead of restoring the old one.
         val recreated = next.upsert(profile("c"), "工作")
@@ -260,7 +260,7 @@ class ProfileOrganizationTest {
         assertEquals(base.profiles.map { it.userAgent }, next.profiles.map { it.userAgent })
         assertEquals(base.profiles.map { it.platform }, next.profiles.map { it.platform })
         assertEquals(base.profiles.map { it.favorite }, next.profiles.map { it.favorite })
-        assertEquals(base.lastProfileId, next.lastProfileId)
+        assertEquals(base.defaultProfileId, next.defaultProfileId)
         // Only the profiles of the deleted category move to null.
         assertNull(next.profiles.first { it.id == "e" }.categoryId)
         assertEquals("work", next.profiles.first { it.id == "a" }.categoryId)

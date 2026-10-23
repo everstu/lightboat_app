@@ -208,7 +208,7 @@ class MainActivity : AppCompatActivity() {
         binding.settingsButton.setOnClickListener { showProfiles() }
         binding.editButton.setOnClickListener { showProfiles() }
         binding.refreshButton.setOnClickListener { currentProfile()?.let { openProfile(it) } }
-        binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchLast() }
+        binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchDefault() }
         binding.debugLogButton.setOnClickListener { showScriptLogs() }
         binding.addButton.setOnClickListener { showEditor(null) }
         binding.emptyAddButton.setOnClickListener { showEditor(null) }
@@ -321,6 +321,9 @@ class MainActivity : AppCompatActivity() {
         }
         binding.edgeMenuButton.restoreAnchor(savedInstanceState?.getBoolean("menuLeft") ?: false,
             savedInstanceState?.getFloat("menuHeight", 0.68f) ?: 0.68f)
+        // Opening a profile no longer changes the saved default, so a recreated
+        // activity resumes the profile it was showing; only a cold start opens the default.
+        currentId = savedInstanceState?.getString("currentProfileId")?.takeIf { id -> config.profiles.any { it.id == id } }
         if (savedInstanceState?.getBoolean("editor") == true) {
             showEditor(config.profiles.firstOrNull { it.id == savedInstanceState.getString("editingId") })
             binding.nameInput.setText(savedInstanceState.getString("draftName"))
@@ -346,7 +349,8 @@ class MainActivity : AppCompatActivity() {
             }
             savedInstanceState.getString("draftNote")?.let { binding.noteInput.setText(it) }
             updateNoteCounter()
-        } else if (savedInstanceState?.getBoolean("manager") == true) showProfiles() else launchLast()
+        } else if (savedInstanceState?.getBoolean("manager") == true) showProfiles()
+        else currentProfile()?.let { openProfile(it) } ?: launchDefault()
     }
 
     private fun discardBackupFiles(files: List<java.io.File>) {
@@ -359,8 +363,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun launchLast() {
-        config.lastProfile?.let { openProfile(it) } ?: showProfiles()
+    private fun launchDefault() {
+        config.defaultProfile?.let { openProfile(it) } ?: showProfiles()
     }
 
     private fun showAppVersion() {
@@ -665,7 +669,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupProfileList() {
         profileAdapter = ProfileAdapter(::openProfile, ::showEditor, ::confirmDeleteProfile, ::toggleProfileFavorite,
-            ::moveProfileToTop, ::showProfileNote)
+            ::moveProfileToTop, ::showProfileNote, ::setDefaultProfile)
         binding.profilesList.layoutManager = LinearLayoutManager(this)
         binding.profilesList.setHasFixedSize(true)
         binding.profilesList.adapter = profileAdapter
@@ -723,6 +727,15 @@ class MainActivity : AppCompatActivity() {
             renderProfiles()
             binding.profilesList.scrollToPosition(0)
             toast(getString(R.string.profile_moved_top))
+        }
+    }
+
+    private fun setDefaultProfile(profile: Profile) {
+        commitProfileOrder()
+        if (config.profiles.none { it.id == profile.id } || config.defaultProfileId == profile.id) return
+        if (persist(config.setDefault(profile.id))) {
+            renderProfiles()
+            toast(getString(R.string.profile_set_default_done, profile.name))
         }
     }
 
@@ -848,7 +861,7 @@ class MainActivity : AppCompatActivity() {
             note = note,
         )
         val next = try {
-            config.replaceScriptLibrary(draftScriptLibrary).upsert(profile, categoryName).let { if (openAfterSave) it.select(profile.id) else it }
+            config.replaceScriptLibrary(draftScriptLibrary).upsert(profile, categoryName)
         } catch (error: Exception) {
             toast(error.message.orEmpty()); return
         }
@@ -964,7 +977,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun openProfile(profile: Profile, skippedScriptIds: Set<String>, clearWebCache: Boolean = false) {
         DebugLog.event("profile", "open name=${profile.name.take(80)} url=${DebugLog.safeUrl(profile.url)} scripts=${profile.scripts.count { it.enabled }} platform=${profile.platform}")
-        if (config.lastProfileId != profile.id && !persist(config.select(profile.id))) return
         hideKeyboard()
         cancelDownload()
         // Every launch/switch gets a clean browser and script-loader renderer.
@@ -1376,11 +1388,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun returnToPage() {
-        if (webView != null && pageReady) showScreen(Screen.BROWSER) else launchLast()
+        if (webView != null && pageReady) showScreen(Screen.BROWSER)
+        else currentProfile()?.let { openProfile(it) } ?: launchDefault()
     }
 
     private fun leaveProfileManager() {
-        if ((webView != null && pageReady) || config.lastProfile != null) returnToPage() else confirmExit()
+        if ((webView != null && pageReady) || config.defaultProfile != null) returnToPage() else confirmExit()
     }
 
     private fun showLoading(title: Int) {
@@ -1406,7 +1419,7 @@ class MainActivity : AppCompatActivity() {
         binding.retryButton.visibility = View.VISIBLE
         binding.editButton.visibility = View.VISIBLE
         binding.retryButton.setText(R.string.retry)
-        binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchLast() }
+        binding.retryButton.setOnClickListener { currentProfile()?.let { openProfile(it) } ?: launchDefault() }
         binding.editButton.setText(R.string.edit_addresses)
         binding.editButton.setOnClickListener { showProfiles() }
         // Every error page starts without the recovery entry; a stale click
@@ -1462,7 +1475,7 @@ class MainActivity : AppCompatActivity() {
         binding.retryButton.setOnClickListener {
             if (screen != Screen.ERROR || currentId != profileId) return@setOnClickListener
             val profile = config.profiles.firstOrNull { it.id == profileId }
-            if (profile == null) launchLast() else openProfile(profile, emptySet(), clearWebCache = true)
+            if (profile == null) launchDefault() else openProfile(profile, emptySet(), clearWebCache = true)
         }
     }
 
@@ -1479,7 +1492,7 @@ class MainActivity : AppCompatActivity() {
                 rememberProfileFilter(profileFilter)
                 cancelDownload(); destroyWebView(); currentId = null
                 toast(getString(R.string.import_success, imported.profiles.size))
-                launchLast()
+                launchDefault()
                 true
             }
         }
@@ -1533,7 +1546,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmExit() {
-        showNativeDialog(ExitConfirmationDialog(this, config.lastProfile, screen == Screen.BROWSER) { finish() })
+        showNativeDialog(ExitConfirmationDialog(this, config.defaultProfile, screen == Screen.BROWSER) { finish() })
     }
 
     private fun hideKeyboard() {
@@ -1588,6 +1601,7 @@ class MainActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
         outState.putBoolean("pendingBackupExport", exportOptions != null)
         exportOptions?.let { outState.putBoolean("exportScriptData", it.scriptData); outState.putBoolean("exportPreferences", it.preferences) }
+        outState.putString("currentProfileId", currentId)
         outState.putBoolean("manager", screen == Screen.PROFILES)
         outState.putBoolean("editor", screen == Screen.EDITOR)
         outState.putString("editingId", editingId)

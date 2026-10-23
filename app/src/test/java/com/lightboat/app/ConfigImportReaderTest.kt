@@ -19,7 +19,7 @@ class ConfigImportReaderTest {
     @Test fun localUtf8AndBomPreserveConfigurationOrderAndSelection() {
         val second = Profile("second", "第二组", "https://example.org/", listOf(ProfileScript("shared", enabled = false)))
         val ordered = config.upsert(second, "工作").toggleFavorite(second.id)
-            .reorder(listOf(second.id, "first")).select(second.id)
+            .reorder(listOf(second.id, "first")).setDefault(second.id)
         val bytes = ("\uFEFF" + ConfigCodec.encode(ordered)).toByteArray(Charsets.UTF_8)
         assertEquals(ordered, ConfigImportReader.fromStream(ByteArrayInputStream(bytes), userAgent))
     }

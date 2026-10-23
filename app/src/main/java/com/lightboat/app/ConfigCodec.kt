@@ -81,17 +81,18 @@ object ConfigCodec {
                 references, userAgent, platform, categoryId, favorite, note)
         }
         require(profiles.map { it.id }.distinct().size == profiles.size) { "配置 ID 不能重复" }
+        // "lastProfileId" is the historical key of the default (startup) profile.
         require(root.has("lastProfileId")) { "缺少 lastProfileId" }
-        val lastId = if (root.isNull("lastProfileId")) null else root.getString("lastProfileId")
-        require(if (profiles.isEmpty()) lastId == null else profiles.any { it.id == lastId }) {
+        val defaultId = if (root.isNull("lastProfileId")) null else root.getString("lastProfileId")
+        require(if (profiles.isEmpty()) defaultId == null else profiles.any { it.id == defaultId }) {
             "lastProfileId 必须指向现有配置"
         }
-        return AppConfig(lastId, profiles, categories, library)
+        return AppConfig(defaultId, profiles, categories, library)
     }
 
     fun encode(config: AppConfig): String = JSONObject().apply {
         put("version", 2)
-        put("lastProfileId", config.lastProfileId ?: JSONObject.NULL)
+        put("lastProfileId", config.defaultProfileId ?: JSONObject.NULL)
         put("categories", JSONObject().apply { config.categories.forEach { (id, name) -> put(id, name) } })
         put("scriptLibrary", JSONArray().apply { config.scriptLibrary.forEach { script ->
             put(JSONObject().put("id", script.id).put("name", script.name).put("url", script.url))

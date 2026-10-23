@@ -32,11 +32,12 @@ class ProfileAdapter(
     private val delete: (Profile) -> Unit,
     private val favorite: (Profile) -> Unit,
     private val moveToTop: (Profile) -> Unit,
-    private val showNote: (Profile) -> Unit
+    private val showNote: (Profile) -> Unit,
+    private val setDefault: (Profile) -> Unit
 ) : RecyclerView.Adapter<ProfileAdapter.Holder>() {
     class Holder(val binding: ItemProfileBinding) : RecyclerView.ViewHolder(binding.root)
     private val profiles = mutableListOf<Profile>()
-    private var lastId: String? = null
+    private var defaultId: String? = null
     private var currentId: String? = null
     private var categories: Map<String, String> = emptyMap()
     val orderedIds get() = profiles.map { it.id }
@@ -46,7 +47,7 @@ class ProfileAdapter(
         profiles.clear()
         profiles.addAll(visible)
         categories = config.categories
-        lastId = config.lastProfileId
+        defaultId = config.defaultProfileId
         currentId = current
         notifyDataSetChanged()
     }
@@ -106,15 +107,11 @@ class ProfileAdapter(
             })
         row.profileBadge.setCompoundDrawablesRelativeWithIntrinsicBounds(
             if (profile.platform == BrowserPlatform.ANDROID) R.drawable.ic_profile_android else 0, 0, 0, 0)
-        row.profileState.text = when (profile.id) {
-            currentId -> context.getString(R.string.current_profile)
-            lastId -> context.getString(R.string.last_profile)
-            else -> ""
-        }
-        val hasState = row.profileState.text.isNotEmpty()
-        row.profileState.visibility = if (hasState) View.VISIBLE else View.GONE
-        row.profileState.isActivated = row.root.isActivated
-        val stateColor = context.getColor(if (row.root.isActivated) R.color.accent else R.color.muted)
+        // The corner tag marks the startup default; the open profile keeps the activated card style.
+        val isDefault = profile.id == defaultId
+        row.profileState.text = if (isDefault) context.getString(R.string.default_profile) else ""
+        row.profileState.visibility = if (isDefault) View.VISIBLE else View.GONE
+        val stateColor = context.getColor(R.color.accent)
         row.profileState.setTextColor(stateColor)
         row.profileState.background.mutate().apply { setTint(stateColor); alpha = 96 }
         row.openProfile.contentDescription = context.getString(R.string.profile_open_description, profile.name)
@@ -123,6 +120,7 @@ class ProfileAdapter(
         row.editProfile.setOnClickListener { edit(profile) }
         row.profileMore.setOnClickListener {
             PopupMenu(context, row.profileMore).apply {
+                if (!isDefault) menu.add(R.string.set_default_profile).setOnMenuItemClickListener { setDefault(profile); true }
                 menu.add(R.string.view_note).setOnMenuItemClickListener { showNote(profile); true }
                 menu.add(R.string.delete).setOnMenuItemClickListener { delete(profile); true }
             }.show()

@@ -46,6 +46,15 @@ class BackupArchiveTest {
         }
     }
 
+    @Test fun roundTripKeepsAnExplicitDefaultThatIsNotTheFirstProfile() {
+        val withDefault = config.upsert(Profile("other-id", "其他", "https://other.example/")).setDefault("other-id")
+        val source = payload().apply { resolve("config.json").writeText(ConfigCodec.encode(withDefault)) }
+        val zip = temporary.newFile().also { BackupArchive.write(source, it, "Test device", "1.0.3 (35)") { file -> JSONObject(file.readText()) } }
+        val result = BackupArchive.open(zip, File(temporary.root, "restored-default")) { file -> JSONObject(file.readText()) }
+        assertEquals("other-id", result.config.defaultProfileId)
+        assertEquals(withDefault, result.config)
+    }
+
     @Test fun rejectsTraversalUnknownEntriesAndBackslashPathsAndCleansStaging() {
         listOf("../escape", "/config.json", "C:/config.json", "userscript-values\\$hashName", "cookies.json").forEachIndexed { index, path ->
             val bad = temporary.newFile()

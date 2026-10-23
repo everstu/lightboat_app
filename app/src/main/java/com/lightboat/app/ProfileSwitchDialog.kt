@@ -2,7 +2,9 @@ package com.lightboat.app
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -139,8 +141,16 @@ internal class ProfileSwitchDialog(
         }
 
         override fun getItemCount() = visible.size
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
-            Holder(ItemSwitchProfileBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+            val row = ItemSwitchProfileBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+            // Match the profile manager's corner tag: clipped by the rounded row, translucent
+            // accent fill and a fixed compact label size that does not grow the toolbar area.
+            row.root.clipToOutline = true
+            row.profileState.background.mutate().alpha = 96
+            row.profileState.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) row.profileState.setFallbackLineSpacing(false)
+            return Holder(row)
+        }
 
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val profile = visible[position]
@@ -157,21 +167,35 @@ internal class ProfileSwitchDialog(
             val density = context.resources.displayMetrics.density
             val verticalPadding = ((if (compactRows) 8 else 12) * density).toInt()
             val horizontal = context.resources.getDimensionPixelSize(R.dimen.ui_field_inset)
-            row.root.setPadding(horizontal, verticalPadding, horizontal, verticalPadding)
-            row.root.minimumHeight = ((if (compactRows) 64 else 80) * density).toInt()
-            row.profileMeta.visibility = if (compactRows) View.GONE else View.VISIBLE
+            row.profileContent.setPadding(horizontal, verticalPadding, horizontal, verticalPadding)
+            row.profileContent.minimumHeight = ((if (compactRows) 64 else 80) * density).toInt()
+            row.profilePlatform.visibility = if (compactRows) View.GONE else View.VISIBLE
             row.profileInitial.text = profile.name.substring(0, profile.name.offsetByCodePoints(0, 1)).uppercase()
             row.profileName.text = profile.name
             row.profileHost.text = host
             val category = config.categories[profile.categoryId] ?: context.getString(R.string.category_none)
             row.profilePlatform.text = context.getString(R.string.profile_category_platform, platform, category)
             row.profileFavorite.visibility = if (profile.favorite) View.VISIBLE else View.GONE
-            row.profileState.setText(R.string.current_profile)
-            row.profileState.visibility = if (current) View.VISIBLE else View.GONE
+            val isDefault = profile.id == config.defaultProfileId
+            row.profileState.setText(R.string.default_profile)
+            row.profileState.visibility = if (isDefault) View.VISIBLE else View.GONE
+            // The floating tag sits above the trailing icons; keep long names clear of it.
+            val nameEnd = if (!isDefault) 0 else {
+                row.profileState.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+                val tagSpan = (row.profileState.layoutParams as ViewGroup.MarginLayoutParams).marginEnd +
+                    row.profileState.measuredWidth + (4 * density).toInt()
+                val trailing = horizontal + context.resources.getDimensionPixelSize(R.dimen.ui_item_gap) +
+                    ((if (profile.favorite) 22 + 8 + 18 else 22) * density).toInt()
+                (tagSpan - trailing).coerceAtLeast(0)
+            }
+            row.profileName.setPaddingRelative(0, 0, nameEnd, 0)
             row.profileIndicator.setImageResource(if (current) R.drawable.ic_check_circle else R.drawable.ic_chevron)
             row.root.contentDescription = context.getString(R.string.profile_switch_description, profile.name, host,
                 row.profilePlatform.text) + if (profile.favorite) context.getString(R.string.profile_favorite_suffix) else ""
-            ViewCompat.setStateDescription(row.root, if (current) context.getString(R.string.current_profile) else null)
+            ViewCompat.setStateDescription(row.root, listOfNotNull(
+                context.getString(R.string.menu_current_profile).takeIf { current },
+                context.getString(R.string.default_profile).takeIf { isDefault }
+            ).joinToString("，").ifEmpty { null })
             row.root.setOnClickListener { select(profile) }
         }
     }

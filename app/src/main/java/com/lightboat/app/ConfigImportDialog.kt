@@ -125,12 +125,13 @@ internal class ConfigImportDialog(
                     binding.importBackupOptions.configure(info.options, info.options, restore = true)
                     context.getString(R.string.webdav_backup_summary,
                         java.text.DateFormat.getDateTimeInstance().format(java.util.Date(info.createdAt)), info.device,
-                        info.profiles, info.scripts, info.stores, android.text.format.Formatter.formatShortFileSize(context, info.bytes)) +
+                        info.profiles, info.scripts, info.stores, android.text.format.Formatter.formatShortFileSize(context, info.bytes),
+                        config.defaultProfile?.name ?: context.getString(R.string.import_no_startup)) +
                         "\n\n" + context.getString(R.string.backup_import_replace_note)
                 } else if (config.profiles.isEmpty()) {
                     context.getString(R.string.import_empty_confirm, currentCount())
                 } else context.getString(R.string.import_message, config.profiles.size, currentCount(),
-                    config.lastProfile?.name ?: context.getString(R.string.import_no_startup))
+                    config.defaultProfile?.name ?: context.getString(R.string.import_no_startup))
                 showFeedback(summary, false)
             }.onFailure { error ->
                 val message = when (error) {

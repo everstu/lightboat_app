@@ -9,23 +9,37 @@ class AppConfigTest {
     private val second = Profile("second", "测试", "http://localhost:8080")
 
     @Test fun firstProfileIsStartupProfile() {
-        assertEquals(first, AppConfig.EMPTY.upsert(first).lastProfile)
+        assertEquals(first, AppConfig.EMPTY.upsert(first).defaultProfile)
     }
 
     @Test fun selectionPersistsAcrossJsonRoundTrip() {
         val config = AppConfig.EMPTY.upsert(first).upsert(second)
-        assertEquals(first, config.lastProfile)
+        assertEquals(first, config.defaultProfile)
         val edited = second.copy(url = "https://new.example.com")
-        val switched = config.upsert(edited).select("second")
-        assertEquals(edited, ConfigCodec.decode(ConfigCodec.encode(switched)).lastProfile)
-        assertThrows(IllegalArgumentException::class.java) { config.select("missing") }
+        val switched = config.upsert(edited).setDefault("second")
+        assertEquals(edited, ConfigCodec.decode(ConfigCodec.encode(switched)).defaultProfile)
+        assertThrows(IllegalArgumentException::class.java) { config.setDefault("missing") }
+    }
+
+    @Test fun defaultProfileChangesOnlyExplicitlyAndKeepsTheCompatibleJsonKey() {
+        val config = AppConfig.EMPTY.upsert(first).upsert(second)
+        val chosen = config.setDefault("second")
+        assertEquals(config.profiles, chosen.profiles)
+        // Editing, reordering and favoriting other profiles never move the default.
+        assertEquals("second", chosen.upsert(first.copy(name = "改名")).moveToTop("first").toggleFavorite("first").defaultProfileId)
+        val json = JSONObject(ConfigCodec.encode(chosen))
+        assertEquals("second", json.getString("lastProfileId"))
+        assertFalse(json.has("defaultProfileId"))
+        // Backups from earlier versions keep their last opened profile as the default.
+        val legacy = """{"version":1,"lastProfileId":"b","profiles":[{"id":"a","name":"A","url":"https://a.example"},{"id":"b","name":"B","url":"https://b.example"}]}"""
+        assertEquals("B", ConfigCodec.decode(legacy).defaultProfile?.name)
     }
 
     @Test fun deletionRetainsValidSelectionOrClearsItWhenEmpty() {
         val config = AppConfig.EMPTY.upsert(first).upsert(second)
-        assertEquals(second, config.remove("first").lastProfile)
+        assertEquals(second, config.remove("first").defaultProfile)
         assertEquals(AppConfig.EMPTY, config.remove("first").remove("second"))
-        assertEquals(first, config.remove("second").lastProfile)
+        assertEquals(first, config.remove("second").defaultProfile)
     }
 
     @Test fun urlsKeepQueriesAndSupportHttp() {
@@ -63,7 +77,7 @@ class AppConfigTest {
     @Test fun missingNullOrBlankScriptAddressMeansNoInjectedScript() {
         listOf("", ",\"scriptUrl\":null", ",\"scriptUrl\":\"\"", ",\"scriptUrl\":\"   \"").forEach { optionalField ->
             val json = """{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"普通网页","url":"https://example.com"$optionalField}]}"""
-            assertTrue(ConfigCodec.decode(json).lastProfile!!.scripts.isEmpty())
+            assertTrue(ConfigCodec.decode(json).defaultProfile!!.scripts.isEmpty())
         }
     }
 
@@ -77,21 +91,21 @@ class AppConfigTest {
     @Test fun customUserAgentRoundTripsWithoutChangingSelection() {
         val profile = first.copy(userAgent = "Custom Android Mobile/1.0", platform = BrowserPlatform.ANDROID)
         val config = AppConfig.EMPTY.upsert(profile)
-        assertEquals(profile, ConfigCodec.decode(ConfigCodec.encode(config)).lastProfile)
+        assertEquals(profile, ConfigCodec.decode(ConfigCodec.encode(config)).defaultProfile)
     }
 
     @Test fun platformPresetRoundTripsAndLegacyConfigInfersItFromUserAgent() {
         val apple = first.copy(userAgent = MobileUserAgent.appleSafari(), platform = BrowserPlatform.APPLE)
         assertEquals(BrowserPlatform.APPLE,
-            ConfigCodec.decode(ConfigCodec.encode(AppConfig.EMPTY.upsert(apple))).lastProfile?.platform)
+            ConfigCodec.decode(ConfigCodec.encode(AppConfig.EMPTY.upsert(apple))).defaultProfile?.platform)
         val legacy = """{"version":1,"lastProfileId":"w","profiles":[{"id":"w","name":"Windows","url":"https://example.com","scriptUrl":"https://example.com/a.js","userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140.0.0.0"}]}"""
-        assertEquals(BrowserPlatform.WINDOWS, ConfigCodec.decode(legacy).lastProfile?.platform)
+        assertEquals(BrowserPlatform.WINDOWS, ConfigCodec.decode(legacy).defaultProfile?.platform)
     }
 
     @Test fun oldConfigUsesProvidedDefaultUserAgent() {
         val text = """{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"应用","url":"https://example.com","scriptUrl":"https://example.com/a.js"}]}"""
-        assertEquals("Device Android Mobile/1.0", ConfigCodec.decode(text, "Device Android Mobile/1.0").lastProfile?.userAgent)
-        assertEquals(AppConfig.DEFAULT_USER_AGENT, ConfigCodec.decode(text).lastProfile?.userAgent)
+        assertEquals("Device Android Mobile/1.0", ConfigCodec.decode(text, "Device Android Mobile/1.0").defaultProfile?.userAgent)
+        assertEquals(AppConfig.DEFAULT_USER_AGENT, ConfigCodec.decode(text).defaultProfile?.userAgent)
     }
 
     @Test fun rejectsEmptyNonAsciiAndHeaderInjectionUserAgents() {
@@ -112,10 +126,10 @@ class AppConfigTest {
     }
 
     @Test fun reorderingPreservesValuesAndLastSelectionAcrossJsonRoundTrip() {
-        val config = AppConfig.EMPTY.upsert(first).upsert(second).select(first.id)
+        val config = AppConfig.EMPTY.upsert(first).upsert(second).setDefault(first.id)
         val reordered = config.reorder(listOf(second.id, first.id))
         assertEquals(listOf(second, first), reordered.profiles)
-        assertEquals(first, reordered.lastProfile)
+        assertEquals(first, reordered.defaultProfile)
         assertEquals(reordered, ConfigCodec.decode(ConfigCodec.encode(reordered)))
         assertEquals(config, reordered.reorder(listOf(first.id, second.id)))
     }
@@ -132,7 +146,7 @@ class AppConfigTest {
         val note = "  中文说明 😀\n第二行\t缩进   \r\n<b>文本</b> & <script>  "
         val profile = first.copy(note = note)
         val config = AppConfig.EMPTY.upsert(profile)
-        val decoded = ConfigCodec.decode(ConfigCodec.encode(config)).lastProfile!!
+        val decoded = ConfigCodec.decode(ConfigCodec.encode(config)).defaultProfile!!
         assertEquals(note, decoded.note)
         assertEquals(profile.copy(note = ""), decoded.copy(note = ""))
         assertEquals(note, JSONObject(ConfigCodec.encode(config)).getJSONArray("profiles")
@@ -144,15 +158,15 @@ class AppConfigTest {
         val item = encoded.getJSONArray("profiles").getJSONObject(0)
         assertTrue(item.has("note"))
         assertEquals("", item.getString("note"))
-        assertEquals("", ConfigCodec.decode("""{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"旧配置","url":"https://example.com"}]}""").lastProfile?.note)
+        assertEquals("", ConfigCodec.decode("""{"version":1,"lastProfileId":"a","profiles":[{"id":"a","name":"旧配置","url":"https://example.com"}]}""").defaultProfile?.note)
 
         fun variant(change: JSONObject.() -> Unit): String = JSONObject(encoded.toString()).let { root ->
             root.getJSONArray("profiles").getJSONObject(0).change()
             root.toString()
         }
-        assertEquals("", ConfigCodec.decode(variant { remove("note") }).lastProfile?.note)
-        assertEquals("", ConfigCodec.decode(variant { put("note", JSONObject.NULL) }).lastProfile?.note)
-        assertEquals("", ConfigCodec.decode(variant { put("note", "  \n\t\r ") }).lastProfile?.note)
+        assertEquals("", ConfigCodec.decode(variant { remove("note") }).defaultProfile?.note)
+        assertEquals("", ConfigCodec.decode(variant { put("note", JSONObject.NULL) }).defaultProfile?.note)
+        assertEquals("", ConfigCodec.decode(variant { put("note", "  \n\t\r ") }).defaultProfile?.note)
     }
 
     @Test fun nonStringNotesAreRejectedInsteadOfBeingConverted() {

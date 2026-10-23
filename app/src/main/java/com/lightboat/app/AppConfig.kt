@@ -19,12 +19,17 @@ data class Profile(
 )
 
 data class AppConfig(
-    val lastProfileId: String?,
+    /**
+     * Profile opened when the app starts. Opening other profiles never changes it;
+     * only an explicit "set as default" does. Persisted under the historical
+     * `lastProfileId` JSON key so older backups and app versions stay compatible.
+     */
+    val defaultProfileId: String?,
     val profiles: List<Profile>,
     val categories: Map<String, String> = emptyMap(),
     val scriptLibrary: List<SharedScript> = emptyList()
 ) {
-    val lastProfile: Profile? get() = profiles.firstOrNull { it.id == lastProfileId }
+    val defaultProfile: Profile? get() = profiles.firstOrNull { it.id == defaultProfileId }
 
     fun upsert(profile: Profile): AppConfig {
         require(profile.categoryId == null || categories.containsKey(profile.categoryId)) { "配置引用的分类不存在" }
@@ -36,7 +41,7 @@ data class AppConfig(
             profiles.map { if (it.id == profile.id) profile else it }
         } else profiles + profile
         require(next.size <= MAX_PROFILES) { "最多支持 $MAX_PROFILES 组配置" }
-        return copy(lastProfileId = if (profiles.isEmpty()) profile.id else lastProfileId, profiles = next)
+        return copy(defaultProfileId = if (profiles.isEmpty()) profile.id else defaultProfileId, profiles = next)
     }
 
     fun upsert(profile: Profile, categoryName: String): AppConfig {
@@ -76,12 +81,12 @@ data class AppConfig(
 
     fun remove(id: String): AppConfig {
         val next = profiles.filterNot { it.id == id }
-        return copy(lastProfileId = if (lastProfileId == id) next.firstOrNull()?.id else lastProfileId, profiles = next)
+        return copy(defaultProfileId = if (defaultProfileId == id) next.firstOrNull()?.id else defaultProfileId, profiles = next)
     }
 
-    fun select(id: String): AppConfig {
+    fun setDefault(id: String): AppConfig {
         require(profiles.any { it.id == id }) { "配置不存在" }
-        return copy(lastProfileId = id)
+        return copy(defaultProfileId = id)
     }
 
     fun reorder(ids: List<String>): AppConfig {

@@ -180,7 +180,7 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
         pending = Pending.Restore(backup, remote)
         binding.webdavRestoreOptions.configure(backup.info.options, backup.info.options, restore = true)
         binding.webdavPreviewTitle.setText(R.string.webdav_restore_title)
-        binding.webdavPreviewDetails.text = describe(backup.info) + "\n\n" + context.getString(R.string.webdav_restore_message)
+        binding.webdavPreviewDetails.text = describe(backup.info, backup.config) + "\n\n" + context.getString(R.string.webdav_restore_message)
         binding.webdavConfirm.setText(R.string.webdav_restore_confirm)
         updateControls(); feedback(context.getString(R.string.webdav_validated)); revealPreview()
     }
@@ -202,9 +202,10 @@ internal class WebDavDialog(activity: AppCompatActivity, defaultUserAgent: Strin
         }
     }
 
-    private fun describe(info: BackupInfo) = context.getString(R.string.webdav_backup_summary,
+    private fun describe(info: BackupInfo, config: AppConfig) = context.getString(R.string.webdav_backup_summary,
         formatTime(info.createdAt), info.device, info.profiles, info.scripts, info.stores,
-        android.text.format.Formatter.formatShortFileSize(context, info.bytes))
+        android.text.format.Formatter.formatShortFileSize(context, info.bytes),
+        config.defaultProfile?.name ?: context.getString(R.string.import_no_startup))
 
     private fun showHistory() {
         binding.webdavHistory.text = context.getString(R.string.webdav_history,
