@@ -46,6 +46,9 @@ internal class ScriptEditorDialog(
         super.onCreate(savedInstanceState)
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE)
         setContentView(binding.root)
+        // A focus-scroll animation can finish after the IME resize and overwrite our full-field
+        // reveal with a stale offset. Keep focus scrolling immediate; touch scrolling still works.
+        binding.libraryEditorScroll.isSmoothScrollingEnabled = false
         window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         binding.libraryEditorTitle.setText(if (script == null) R.string.script_new else R.string.edit)
         ViewCompat.setAccessibilityHeading(binding.libraryEditorTitle, true)
@@ -69,16 +72,17 @@ internal class ScriptEditorDialog(
         if (compact == next) return
         compact = next
         val density = context.resources.displayMetrics.density
-        val side = (20 * density).toInt()
-        val vertical = ((if (compact) 2 else 20) * density).toInt()
+        val side = context.resources.getDimensionPixelSize(R.dimen.ui_page_inset)
+        val vertical = if (compact) (2 * density).toInt() else side
         binding.root.setPadding(side, vertical, side, vertical)
         listOf(binding.libraryNameInput, binding.libraryUrlInput).forEach { input ->
-            input.minimumHeight = ((if (compact) 48 else 56) * density).toInt()
-            val padding = ((if (compact) 12 else 16) * density).toInt()
-            input.setPadding((16 * density).toInt(), padding, (16 * density).toInt(), padding)
+            input.minimumHeight = context.resources.getDimensionPixelSize(R.dimen.ui_touch_target)
+            val padding = ((if (compact) 8 else 12) * density).toInt()
+            val horizontal = context.resources.getDimensionPixelSize(R.dimen.ui_field_inset)
+            input.setPadding(horizontal, padding, horizontal, padding)
         }
         (binding.libraryEditorActions.layoutParams as ViewGroup.MarginLayoutParams).apply {
-            topMargin = ((if (compact) 2 else 12) * density).toInt()
+            topMargin = ((if (compact) 2 else 8) * density).toInt()
             binding.libraryEditorActions.layoutParams = this
         }
         binding.root.doOnNextLayout {

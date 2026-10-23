@@ -1,31 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
-    android:padding="24dp" android:background="@drawable/bg_config_dialog" android:focusableInTouchMode="true">
+    android:padding="@dimen/ui_page_inset" android:background="@drawable/bg_config_dialog" android:focusableInTouchMode="true">
     <TextView android:id="@+id/noteTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="@string/profile_note_title" android:textColor="@color/ink" android:textSize="22sp" android:textStyle="bold" />
+        android:text="@string/profile_note_title" android:textColor="@color/ink" android:textSize="@dimen/ui_dialog_title" android:textStyle="bold" />
     <TextView android:id="@+id/noteProfile" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:layout_marginTop="4dp" android:textColor="@color/muted" android:textSize="13sp"
         android:maxLines="1" android:ellipsize="end" />
     <FrameLayout android:id="@+id/noteCard" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="18dp" android:background="@drawable/bg_input" android:padding="16dp">
+        android:layout_marginTop="@dimen/ui_section_gap" android:background="@drawable/bg_input" android:padding="@dimen/ui_field_inset">
         <com.lightboat.app.BoundedScrollView android:id="@+id/noteScroll"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:fillViewport="false" android:scrollbars="vertical">
             <TextView android:id="@+id/noteText"
                 android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:textColor="@color/ink" android:textSize="15sp" android:lineSpacingExtra="4dp"
+                android:textColor="@color/ink" android:textSize="@dimen/ui_body_text" android:lineSpacingExtra="4dp"
                 android:breakStrategy="high_quality" android:textIsSelectable="true"
                 android:focusable="true" android:focusableInTouchMode="true" />
         </com.lightboat.app.BoundedScrollView>
     </FrameLayout>
     <LinearLayout android:id="@+id/noteActions" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="24dp" android:orientation="horizontal">
+        android:layout_marginTop="@dimen/ui_section_gap" android:orientation="horizontal">
         <Button android:id="@+id/closeNote" style="@style/ConfigSecondary" android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="52dp"
+            android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target"
             android:text="@string/close" />
         <Button android:id="@+id/copyNote" style="@style/ConfigPrimary" android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="52dp"
-            android:layout_marginStart="12dp" android:text="@string/copy_all" />
+            android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target"
+            android:layout_marginStart="@dimen/ui_item_gap" android:text="@string/copy_all" />
     </LinearLayout>
 </LinearLayout>

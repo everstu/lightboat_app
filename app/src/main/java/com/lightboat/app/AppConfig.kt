@@ -59,6 +59,21 @@ data class AppConfig(
         return copy(categories = categories + (id to name))
     }
 
+    /** Delete a category and move its profiles to "uncategorized" in the same configuration. */
+    fun removeCategory(id: String): AppConfig {
+        require(categories.containsKey(id)) { "分类不存在" }
+        return copy(
+            categories = categories - id,
+            profiles = profiles.map { profile ->
+                if (profile.categoryId == id) profile.copy(categoryId = null) else profile
+            }
+        )
+    }
+
+    /** Saved profiles that reference [scriptId], counting disabled references and ignoring filters. */
+    fun scriptReferenceCount(scriptId: String): Int =
+        profiles.count { profile -> profile.scripts.any { reference -> reference.scriptId == scriptId } }
+
     fun remove(id: String): AppConfig {
         val next = profiles.filterNot { it.id == id }
         return copy(lastProfileId = if (lastProfileId == id) next.firstOrNull()?.id else lastProfileId, profiles = next)

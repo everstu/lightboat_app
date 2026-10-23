@@ -19,6 +19,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class ProfileFilterPersistenceTest {
@@ -180,6 +183,80 @@ class ProfileFilterPersistenceTest {
         openFromBrowser("menuSettings")
         assertManager(true, 1)
         assertEquals(1, ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load().profiles.count { it.favorite })
+    }
+
+    @Test fun deletingTheFilteredCategoryPersistsGlobalFavoritesAcrossLaunches() {
+        preferences.edit().putString("categoryId", "work").putBoolean("favoritesOnly", true).commit()
+        relaunch()
+        var browser: android.webkit.WebView? = null
+        waitFor("The fixture page did not finish loading") {
+            scenario!!.onActivity { activity ->
+                browser = MainActivity::class.java.getDeclaredField("webView").apply { isAccessible = true }
+                    .get(activity) as? android.webkit.WebView
+            }
+            var loaded = false
+            scenario!!.onActivity { loaded = browser?.title == "Filter persistence fixture" && browser?.progress == 100 }
+            loaded
+        }
+        fun evaluate(script: String): String {
+            val result = AtomicReference<String>()
+            val done = CountDownLatch(1)
+            scenario!!.onActivity { browser!!.evaluateJavascript(script) { result.set(it); done.countDown() } }
+            assertTrue("The existing page did not answer", done.await(5, TimeUnit.SECONDS))
+            return result.get()
+        }
+        assertEquals("\"kept\"", evaluate("window.__categoryDeleteSentinel = 'kept'"))
+        openFromBrowser("menuSettings")
+        assertManager(true, 1)
+        click("renameCategories")
+        click("deleteCategory")
+        confirmCategoryDeletion()
+        waitFor("The filtered category was not deleted") {
+            !ConfigStore(context, AppConfig.DEFAULT_USER_AGENT).load().categories.containsKey("work")
+        }
+        assertNull(preferences.getString("categoryId", null))
+        assertTrue(preferences.getBoolean("favoritesOnly", false))
+        assertManager(true, 1)
+        scenario!!.onActivity { activity ->
+            assertSame("Deleting a category recreated the browser", browser,
+                MainActivity::class.java.getDeclaredField("webView").apply { isAccessible = true }.get(activity))
+            assertEquals("favorite", MainActivity::class.java.getDeclaredField("currentId")
+                .apply { isAccessible = true }.get(activity))
+            activity.findViewById<View>(R.id.returnButton).performClick()
+        }
+        assertEquals("The existing document was reloaded", "\"kept\"", evaluate("window.__categoryDeleteSentinel"))
+        openFromBrowser("menuSwitch")
+        assertEquals(context.getString(R.string.category_all), node("categoryFilter")!!.text.toString())
+        assertTrue(node("favoriteFilter")!!.isSelected)
+        click("closeSwitch")
+        relaunch()
+        openFromBrowser("menuSettings")
+        assertManager(true, 1)
+        assertNull(preferences.getString("categoryId", null))
+        assertTrue(preferences.getBoolean("favoritesOnly", false))
+    }
+
+    private fun confirmCategoryDeletion() {
+        waitFor("The category delete confirmation is missing") {
+            var ready = false
+            scenario!!.onActivity { activity ->
+                ready = runCatching {
+                    val parent = MainActivity::class.java.getDeclaredField("nativeDialog")
+                        .apply { isAccessible = true }.get(activity)
+                    val confirmation = CategoryRenameDialog::class.java.getDeclaredField("confirmation")
+                        .apply { isAccessible = true }.get(parent) as androidx.appcompat.app.AlertDialog
+                    confirmation.isShowing
+                }.getOrDefault(false)
+            }
+            ready
+        }
+        scenario!!.onActivity { activity ->
+            val parent = MainActivity::class.java.getDeclaredField("nativeDialog").apply { isAccessible = true }.get(activity)
+            val confirmation = CategoryRenameDialog::class.java.getDeclaredField("confirmation")
+                .apply { isAccessible = true }.get(parent) as androidx.appcompat.app.AlertDialog
+            confirmation.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+        }
+        instrumentation.waitForIdleSync()
     }
 
     private fun import(config: AppConfig) {

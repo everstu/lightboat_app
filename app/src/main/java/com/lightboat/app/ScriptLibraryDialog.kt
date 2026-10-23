@@ -1,6 +1,7 @@
 package com.lightboat.app
 
 import android.annotation.SuppressLint
+import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -12,9 +13,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDialog
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.view.ViewCompat
+import androidx.core.widget.ImageViewCompat
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.lightboat.app.databinding.DialogScriptLibraryBinding
+import com.lightboat.app.databinding.ItemLibraryHeaderBinding
 import com.lightboat.app.databinding.ItemLibraryScriptBinding
 
 /** Library edits and profile selection are drafts until the enclosing Save succeeds. */
@@ -30,6 +34,7 @@ internal class ScriptLibraryDialog(
     private var library = config.scriptLibrary.toList()
     private val selected = references.orEmpty().toMutableList()
     private val adapter = ScriptAdapter()
+    private val headerAdapter = HeaderAdapter()
     private var editor: AppCompatDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,21 +43,12 @@ internal class ScriptLibraryDialog(
         setContentView(binding.root)
         ViewCompat.setAccessibilityHeading(binding.libraryTitle, true)
         binding.libraryTitle.setText(if (selecting) R.string.script_select else R.string.script_library)
-        binding.libraryHelp.setText(if (selecting) R.string.script_select_help else R.string.script_library_help)
         binding.saveLibrary.setText(if (selecting) R.string.script_confirm_selection else R.string.save_profile)
         binding.libraryList.layoutManager = LinearLayoutManager(context)
-        binding.libraryList.adapter = adapter
+        // Let help and creation actions scroll with the entries on short, large-font screens.
+        // Only the title and final save/cancel actions reserve fixed vertical space.
+        binding.libraryList.adapter = ConcatAdapter(headerAdapter, adapter)
         binding.libraryList.itemAnimator = null
-        binding.newLibraryScript.setOnClickListener { edit(null) }
-        binding.batchAddLibraryScripts.setOnClickListener {
-            showEditor(ScriptBatchDialog(activity) { text ->
-                val result = ScriptBatchInput.addTo(library, text)
-                library = result.library
-                refresh()
-                android.widget.Toast.makeText(context, context.getString(R.string.script_batch_result,
-                    result.added, result.duplicates), android.widget.Toast.LENGTH_SHORT).show()
-            })
-        }
         binding.cancelLibrary.setOnClickListener { dismiss() }
         binding.saveLibrary.setOnClickListener { if (save(library, selected.toList())) dismiss() }
         refresh()
@@ -66,8 +62,8 @@ internal class ScriptLibraryDialog(
     }
 
     private fun remove(script: SharedScript) {
-        val count = config.profiles.count { profile -> profile.scripts.any { it.scriptId == script.id } }
-        val dialog = AlertDialog.Builder(context).setTitle(R.string.script_delete)
+        val count = config.scriptReferenceCount(script.id)
+        val dialog = AlertDialog.Builder(context, R.style.ThemeOverlay_Lightboat_DestructiveAlert).setTitle(R.string.script_delete)
             .setMessage(context.getString(R.string.script_delete_message, script.name, count))
             .setNegativeButton(R.string.import_cancel, null).setPositiveButton(R.string.delete) { _, _ ->
                 library = library.filterNot { it.id == script.id }
@@ -93,9 +89,7 @@ internal class ScriptLibraryDialog(
 
     @SuppressLint("NotifyDataSetChanged")
     private fun refresh() {
-        binding.emptyScriptLibrary.visibility = if (library.isEmpty()) View.VISIBLE else View.GONE
-        binding.newLibraryScript.isEnabled = library.size < AppConfig.MAX_LIBRARY_SCRIPTS
-        binding.batchAddLibraryScripts.isEnabled = library.size < AppConfig.MAX_LIBRARY_SCRIPTS
+        headerAdapter.notifyItemChanged(0)
         adapter.notifyDataSetChanged()
         if (isShowing) binding.root.post { if (isShowing) updateLayout() }
     }
@@ -106,6 +100,33 @@ internal class ScriptLibraryDialog(
         val maxHeight = (context.resources.displayMetrics.heightPixels * 0.86f).toInt()
         DialogLayout.apply(window, binding.root, DialogLayout.width(context), maxHeight)
         updateEditorLayout()
+    }
+
+    private inner class HeaderAdapter : RecyclerView.Adapter<HeaderAdapter.Holder>() {
+        inner class Holder(val header: ItemLibraryHeaderBinding) : RecyclerView.ViewHolder(header.root)
+        override fun getItemCount() = 1
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+            val header = ItemLibraryHeaderBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+            header.libraryHelp.text = context.getString(
+                if (selecting) R.string.script_select_help else R.string.script_library_help,
+                context.getString(R.string.script_usage_help))
+            header.newLibraryScript.setOnClickListener { edit(null) }
+            header.batchAddLibraryScripts.setOnClickListener {
+                showEditor(ScriptBatchDialog(activity) { text ->
+                    val result = ScriptBatchInput.addTo(library, text)
+                    library = result.library
+                    refresh()
+                    android.widget.Toast.makeText(context, context.getString(R.string.script_batch_result,
+                        result.added, result.duplicates), android.widget.Toast.LENGTH_SHORT).show()
+                })
+            }
+            return Holder(header)
+        }
+        override fun onBindViewHolder(holder: Holder, position: Int) {
+            holder.header.emptyScriptLibrary.visibility = if (library.isEmpty()) View.VISIBLE else View.GONE
+            holder.header.newLibraryScript.isEnabled = library.size < AppConfig.MAX_LIBRARY_SCRIPTS
+            holder.header.batchAddLibraryScripts.isEnabled = library.size < AppConfig.MAX_LIBRARY_SCRIPTS
+        }
     }
 
     private inner class ScriptAdapter : RecyclerView.Adapter<ScriptAdapter.Holder>() {
@@ -133,6 +154,7 @@ internal class ScriptLibraryDialog(
                 notifyItemChanged(holder.bindingAdapterPosition.takeIf { it != RecyclerView.NO_POSITION } ?: return@setOnClickListener)
             }
             row.libraryScriptUrl.text = script.url.substringBefore('?').substringBefore('#')
+            bindUsage(row, script)
             row.libraryScriptUrl.setPadding(if (selecting) (36 * context.resources.displayMetrics.density).toInt() else
                 (12 * context.resources.displayMetrics.density).toInt(), 0, (8 * context.resources.displayMetrics.density).toInt(), 0)
             row.chooseLibraryScript.contentDescription = if (selecting) context.getString(R.string.script_library_select_description, script.name) else script.name
@@ -144,5 +166,20 @@ internal class ScriptLibraryDialog(
                 }.show()
             }
         }
+    }
+
+    /** Every bind rewrites text, color, icon and background so recycled rows cannot mix states. */
+    private fun bindUsage(row: ItemLibraryScriptBinding, script: SharedScript) {
+        val count = config.scriptReferenceCount(script.id)
+        val used = count > 0
+        val color = context.getColor(if (used) R.color.accent else R.color.muted)
+        row.libraryScriptUsageText.text = context.getString(R.string.script_usage_short, count)
+        row.libraryScriptUsageText.setTextColor(color)
+        row.libraryScriptUsageText.contentDescription = context.getString(R.string.script_usage, count)
+        row.libraryScriptUsageIcon.setImageResource(
+            if (used) R.drawable.ic_script_usage_linked else R.drawable.ic_script_usage_none)
+        ImageViewCompat.setImageTintList(row.libraryScriptUsageIcon, ColorStateList.valueOf(color))
+        row.libraryScriptUsage.setBackgroundResource(
+            if (used) R.drawable.bg_script_usage_positive else R.drawable.bg_script_usage_zero)
     }
 }

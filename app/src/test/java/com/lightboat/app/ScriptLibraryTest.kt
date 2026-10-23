@@ -96,4 +96,30 @@ class ScriptLibraryTest {
         invalid.getJSONArray("scriptLibrary").getJSONObject(0).put("name", 123)
         assertThrows(IllegalArgumentException::class.java) { ConfigCodec.decode(invalid.toString()) }
     }
+
+    @Test fun savedProfileReferenceCountIgnoresEnablementLibraryDraftsAndSharedEdits() {
+        // a: two saved profiles, b: one of them disabled, missing/unused: none.
+        assertEquals(2, config.scriptReferenceCount("a"))
+        assertEquals(1, config.scriptReferenceCount("b"))
+        assertEquals(0, config.scriptReferenceCount("missing"))
+        val unused = config.upsertScript(SharedScript("unused", "未使用", "https://scripts.example/unused.js"))
+        assertEquals(0, unused.scriptReferenceCount("unused"))
+        // Renaming or changing the address keeps the shared ID, so the count is unchanged.
+        val edited = config.upsertScript(first.copy(name = "去广告", url = "https://new.example/ad.js"))
+        assertEquals(2, edited.scriptReferenceCount("a"))
+        // Deleting a definition removes its references and therefore its count.
+        assertEquals(0, config.removeScript("a").scriptReferenceCount("a"))
+        // The count is a pure profile lookup; it never depends on the current library draft or filters.
+        assertEquals(2, config.copy(scriptLibrary = emptyList()).scriptReferenceCount("a"))
+        assertEquals(1, config.remove("p2").scriptReferenceCount("a"))
+    }
+
+    @Test fun unsavedProfileDraftsDoNotChangeTheSavedCount() {
+        // Selecting scripts in the editor edits draft references; saved profiles change only on Save.
+        assertEquals(2, config.scriptReferenceCount("a"))
+        assertEquals(1, config.scriptReferenceCount("b"))
+        val saved = config.upsert(Profile("p3", "页面三", "https://three.example", listOf(ProfileScript("b", false))))
+        assertEquals(2, saved.scriptReferenceCount("b"))
+        assertEquals(2, saved.scriptReferenceCount("a"))
+    }
 }

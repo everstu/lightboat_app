@@ -3,17 +3,27 @@
     android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
     android:background="@drawable/bg_library_script" android:paddingHorizontal="8dp"
     android:paddingVertical="6dp" android:layout_marginBottom="8dp">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-        <androidx.appcompat.widget.AppCompatCheckBox android:id="@+id/chooseLibraryScript" android:layout_width="0dp"
-            android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="48dp"
-            android:minWidth="0dp" android:paddingStart="4dp" android:paddingEnd="8dp"
-            android:buttonTint="@color/accent" android:fontFamily="sans-serif-medium" android:maxLines="2"
-            android:ellipsize="end" android:textSize="15sp" android:textColor="@color/ink" />
+    <com.lightboat.app.ScriptUsageTitleRow android:id="@+id/libraryScriptTitle" android:layout_width="match_parent" android:layout_height="wrap_content">
+        <androidx.appcompat.widget.AppCompatCheckBox android:id="@+id/chooseLibraryScript" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:minHeight="48dp" android:minWidth="0dp"
+            android:paddingStart="4dp" android:paddingEnd="8dp" android:buttonTint="@color/accent"
+            android:fontFamily="sans-serif-medium" android:maxLines="1" android:ellipsize="end"
+            android:textSize="@dimen/ui_body_text" android:textColor="@color/ink" />
+        <LinearLayout android:id="@+id/libraryScriptUsage" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical"
+            android:minHeight="24dp" android:paddingHorizontal="8dp" android:paddingVertical="3dp"
+            android:background="@drawable/bg_script_usage_positive">
+            <ImageView android:id="@+id/libraryScriptUsageIcon" android:layout_width="14dp" android:layout_height="14dp"
+                android:importantForAccessibility="no" android:src="@drawable/ic_script_usage_linked" />
+            <TextView android:id="@+id/libraryScriptUsageText" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:layout_marginStart="4dp" android:maxLines="1"
+                android:textSize="12sp" android:textColor="@color/accent" android:includeFontPadding="false" />
+        </LinearLayout>
         <ImageButton android:id="@+id/libraryMore" android:layout_width="48dp" android:layout_height="48dp"
             android:padding="14dp" android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@drawable/ic_more" android:contentDescription="@string/script_actions" />
-    </LinearLayout>
+    </com.lightboat.app.ScriptUsageTitleRow>
     <TextView android:id="@+id/libraryScriptUrl" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:paddingStart="36dp" android:paddingEnd="8dp" android:layout_marginBottom="5dp"
-        android:maxLines="1" android:ellipsize="middle" android:textSize="12sp" android:textColor="@color/muted" />
+        android:maxLines="2" android:ellipsize="end" android:textSize="12sp" android:textColor="@color/muted" />
 </LinearLayout>

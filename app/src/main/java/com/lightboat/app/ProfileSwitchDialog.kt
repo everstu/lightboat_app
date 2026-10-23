@@ -98,9 +98,10 @@ internal class ProfileSwitchDialog(
         binding.switchSummary.visibility = if (compact) View.GONE else View.VISIBLE
         binding.startupNote.visibility = if (compact) View.GONE else View.VISIBLE
         val density = context.resources.displayMetrics.density
-        binding.root.setPadding(0, ((if (compact) 12 else 20) * density).toInt(), 0, 0)
-        binding.switchFooter.setPadding((20 * density).toInt(), ((if (compact) 8 else 12) * density).toInt(),
-            (20 * density).toInt(), ((if (compact) 12 else 20) * density).toInt())
+        val side = context.resources.getDimensionPixelSize(R.dimen.ui_page_inset)
+        binding.root.setPadding(0, ((if (compact) 8 else 12) * density).toInt(), 0, 0)
+        binding.switchFooter.setPadding(side, ((if (compact) 4 else 8) * density).toInt(),
+            side, ((if (compact) 8 else 12) * density).toInt())
         entries.setCompact(compact)
         val width = DialogLayout.width(context, maxWidthDp = 560, marginDp = 32)
         val safeInsets = ViewCompat.getRootWindowInsets(activity.window.decorView)
@@ -154,9 +155,10 @@ internal class ProfileSwitchDialog(
             row.root.isActivated = current
             row.root.isSelected = current
             val density = context.resources.displayMetrics.density
-            val verticalPadding = ((if (compactRows) 12 else 16) * density).toInt()
-            row.root.setPadding((16 * density).toInt(), verticalPadding, (16 * density).toInt(), verticalPadding)
-            row.root.minimumHeight = ((if (compactRows) 72 else 96) * density).toInt()
+            val verticalPadding = ((if (compactRows) 8 else 12) * density).toInt()
+            val horizontal = context.resources.getDimensionPixelSize(R.dimen.ui_field_inset)
+            row.root.setPadding(horizontal, verticalPadding, horizontal, verticalPadding)
+            row.root.minimumHeight = ((if (compactRows) 64 else 80) * density).toInt()
             row.profileMeta.visibility = if (compactRows) View.GONE else View.VISIBLE
             row.profileInitial.text = profile.name.substring(0, profile.name.offsetByCodePoints(0, 1)).uppercase()
             row.profileName.text = profile.name

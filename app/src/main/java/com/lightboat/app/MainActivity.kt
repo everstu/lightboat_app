@@ -606,7 +606,7 @@ class MainActivity : AppCompatActivity() {
         binding.profileFilters.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
         binding.renameCategories.visibility = if (config.categories.isEmpty()) View.GONE else View.VISIBLE
         binding.emptyProfiles.visibility = if (config.profiles.isEmpty()) View.VISIBLE else View.GONE
-        binding.profilesSection.visibility = if (config.profiles.isEmpty()) View.GONE else View.VISIBLE
+        updateProfileManagerSpacing()
         binding.profilesList.visibility = if (visible.isEmpty()) View.GONE else View.VISIBLE
         binding.emptyFilteredProfiles.visibility = if (config.profiles.isNotEmpty() && visible.isEmpty()) View.VISIBLE else View.GONE
         binding.profileCount.text = if (profileFilter == ProfileFilter()) getString(R.string.profiles_count, config.profiles.size)
@@ -624,16 +624,39 @@ class MainActivity : AppCompatActivity() {
         profileAdapter.submit(config, currentId.takeIf { webView != null }, visible)
     }
 
+    private fun updateProfileManagerSpacing() {
+        // Keep the list usable on short screens; explanatory chrome returns in portrait.
+        val shortScreen = resources.configuration.screenHeightDp < 480
+        binding.profilesNote.visibility = if (shortScreen) View.GONE else View.VISIBLE
+        binding.profilesSection.visibility = if (shortScreen || config.profiles.isEmpty()) View.GONE else View.VISIBLE
+        binding.versionLabel.visibility = if (shortScreen) View.GONE else View.VISIBLE
+    }
+
     private fun showCategoryRename() {
         commitProfileOrder()
         if (config.categories.isEmpty()) return
-        showNativeDialog(CategoryRenameDialog(this, config, profileFilter.categoryId, categoryNameInputFilter) { next ->
-            if (!persist(next)) false else {
-                renderProfiles()
-                toast(getString(R.string.category_renamed))
-                true
-            }
-        })
+        showNativeDialog(CategoryRenameDialog(this, config, profileFilter.categoryId, categoryNameInputFilter,
+            save = { next ->
+                if (!persist(next)) false else {
+                    renderProfiles()
+                    toast(getString(R.string.category_renamed))
+                    true
+                }
+            },
+            delete = ::deleteCategory))
+    }
+
+    /** Delete a category with its profile associations in one save; true only after saving. */
+    private fun deleteCategory(id: String): Boolean {
+        if (!config.categories.containsKey(id)) return false
+        val affected = config.profiles.count { it.categoryId == id }
+        if (!persist(config.removeCategory(id))) return false
+        // resolve() drops the deleted category while keeping favorites and other filters.
+        rememberProfileFilter(profileFilter)
+        renderProfiles()
+        toast(if (affected > 0) getString(R.string.category_deleted_with_profiles, affected)
+            else getString(R.string.category_deleted))
+        return true
     }
 
     private fun setupProfileList() {
@@ -701,7 +724,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun confirmDeleteProfile(profile: Profile) {
         commitProfileOrder()
-        showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.delete_title)
+        showNativeDialog(AlertDialog.Builder(this, R.style.ThemeOverlay_Lightboat_DestructiveAlert).setTitle(R.string.delete_title)
             .setMessage(getString(R.string.delete_message, profile.name))
             .setNegativeButton(R.string.import_cancel, null)
             .setPositiveButton(R.string.delete) { _, _ ->
@@ -1489,7 +1512,7 @@ class MainActivity : AppCompatActivity() {
         binding.retryButton.setOnClickListener { showConfigImport() }
         binding.editButton.setText(R.string.config_start_over)
         binding.editButton.setOnClickListener {
-            showNativeDialog(AlertDialog.Builder(this).setTitle(R.string.config_start_over)
+            showNativeDialog(AlertDialog.Builder(this, R.style.ThemeOverlay_Lightboat_DestructiveAlert).setTitle(R.string.config_start_over)
                 .setMessage(R.string.config_start_over_message)
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(R.string.config_start_over) { _, _ -> if (persist(AppConfig.EMPTY)) showProfiles() }
@@ -1595,6 +1618,7 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        if (::binding.isInitialized) updateProfileManagerSpacing()
         (nativeDialog as? ResponsiveDialog)?.updateLayout()
         updateChrome()
     }

@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="10dp"
-    android:orientation="horizontal" android:gravity="center_vertical" android:minHeight="96dp"
-    android:background="@drawable/bg_profile_option" android:padding="16dp" android:clickable="true" android:focusable="true">
-    <TextView android:id="@+id/profileInitial" android:layout_width="44dp" android:layout_height="44dp"
+    android:orientation="horizontal" android:gravity="center_vertical" android:minHeight="80dp"
+    android:background="@drawable/bg_profile_option" android:padding="@dimen/ui_field_inset" android:clickable="true" android:focusable="true">
+    <TextView android:id="@+id/profileInitial" android:layout_width="36dp" android:layout_height="36dp"
         android:gravity="center" android:background="@drawable/bg_config_soft" android:textSize="20sp"
         android:textColor="@color/accent" android:textStyle="bold" android:importantForAccessibility="no" />
     <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-        android:orientation="vertical" android:layout_marginStart="14dp" android:layout_marginEnd="12dp"
+        android:orientation="vertical" android:layout_marginStart="@dimen/ui_item_gap" android:layout_marginEnd="@dimen/ui_item_gap"
         android:importantForAccessibility="noHideDescendants">
         <TextView android:id="@+id/profileName" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:textSize="16sp" android:textStyle="bold" android:textColor="@color/ink" android:maxLines="2" android:ellipsize="end" />
+            android:textSize="@dimen/ui_body_text" android:textStyle="bold" android:textColor="@color/ink" android:maxLines="2" android:ellipsize="end" />
         <TextView android:id="@+id/profileHost" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="4dp" android:textSize="13sp" android:textColor="@color/muted" android:maxLines="1" android:ellipsize="middle" />
         <LinearLayout android:id="@+id/profileMeta" android:layout_width="match_parent" android:layout_height="wrap_content"

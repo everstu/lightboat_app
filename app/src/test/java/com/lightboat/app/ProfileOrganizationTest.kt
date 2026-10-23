@@ -198,4 +198,73 @@ class ProfileOrganizationTest {
         val removed = roundTripped.remove("b")
         assertTrue(removed.profiles.all { it.note == notes.getValue(it.id) })
     }
+
+    @Test fun deletingCategoryRetainsProfilesAndMovesThemToUncategorized() {
+        val next = grouped.removeCategory("work")
+        assertEquals(mapOf("play" to "娱乐"), next.categories)
+        assertEquals(listOf("a", "b", "c", "d", "e"), next.profiles.map { it.id })
+        assertEquals("b", next.lastProfileId)
+        assertNull(next.profiles.first { it.id == "a" }.categoryId)
+        assertNull(next.profiles.first { it.id == "c" }.categoryId)
+        assertNull(next.profiles.first { it.id == "d" }.categoryId)
+        assertNull(next.profiles.first { it.id == "b" }.categoryId)
+        assertEquals("play", next.profiles.first { it.id == "e" }.categoryId)
+        // Favorites, order and the untouched category survive; the original config is unchanged.
+        assertTrue(next.profiles.first { it.id == "a" }.favorite)
+        assertTrue(next.profiles.first { it.id == "c" }.favorite)
+        assertEquals(setOf("a", "c", "e"), next.profiles.filter { it.favorite }.map { it.id }.toSet())
+        assertEquals(mapOf("work" to "工作", "play" to "娱乐"), grouped.categories)
+        assertThrows(IllegalArgumentException::class.java) { grouped.removeCategory("missing") }
+    }
+
+    @Test fun deletedCategoryDisappearsFromJsonWithoutDanglingReferences() {
+        val next = grouped.removeCategory("work")
+        val root = JSONObject(ConfigCodec.encode(next))
+        assertFalse(root.getJSONObject("categories").has("work"))
+        assertEquals(1, root.getJSONObject("categories").length())
+        assertTrue(root.getJSONArray("profiles").getJSONObject(0).isNull("categoryId"))
+        assertEquals(next, ConfigCodec.decode(ConfigCodec.encode(next)))
+        assertEquals(5, next.profiles.size)
+        assertEquals(grouped.lastProfileId, next.lastProfileId)
+        // Filtering resolves a deleted category to "all categories" while keeping favorites.
+        assertEquals(ProfileFilter(favoritesOnly = true), ProfileFilter("work", true).resolve(next))
+        assertEquals(ProfileFilter("play", true), ProfileFilter("play", true).resolve(next))
+        assertEquals(ProfileFilter("", true), ProfileFilter("", true).resolve(next))
+        assertEquals(listOf("e"), ProfileFilter("play").apply(next).map { it.id })
+    }
+
+    @Test fun deletingTheLastCategoryKeepsConfigurationsFavoritesAndRecreationRules() {
+        val one = AppConfig("a", listOf(profile("a", true, "work"), profile("b")), linkedMapOf("work" to "工作"))
+        val next = one.removeCategory("work")
+        assertTrue(next.categories.isEmpty())
+        assertEquals(2, next.profiles.size)
+        assertNull(next.profiles.first().categoryId)
+        assertTrue(next.profiles.first().favorite)
+        assertEquals("a", next.lastProfileId)
+        assertEquals(next, ConfigCodec.decode(ConfigCodec.encode(next)))
+        // Re-entering the deleted name later creates a fresh ID instead of restoring the old one.
+        val recreated = next.upsert(profile("c"), "工作")
+        val newId = recreated.profiles.last().categoryId!!
+        assertNotEquals("work", newId)
+        assertEquals("工作", recreated.categories[newId])
+    }
+
+    @Test fun deletingCategoryPreservesNotesScriptsAccessAndUnrelatedProfiles() {
+        val scripts = listOf(SharedScript("s", "脚本", "https://scripts.example/s.js"))
+        val base = grouped.copy(scriptLibrary = scripts,
+            profiles = grouped.profiles.map { it.copy(note = "备注 ${it.id}", scripts = listOf(ProfileScript("s", false))) })
+        val next = base.removeCategory("play")
+        assertEquals(scripts, next.scriptLibrary)
+        assertEquals(base.profiles.map { it.id to it.note }, next.profiles.map { it.id to it.note })
+        assertTrue(next.profiles.all { it.scripts == listOf(ProfileScript("s", false)) })
+        assertEquals(base.profiles.map { it.userAgent }, next.profiles.map { it.userAgent })
+        assertEquals(base.profiles.map { it.platform }, next.profiles.map { it.platform })
+        assertEquals(base.profiles.map { it.favorite }, next.profiles.map { it.favorite })
+        assertEquals(base.lastProfileId, next.lastProfileId)
+        // Only the profiles of the deleted category move to null.
+        assertNull(next.profiles.first { it.id == "e" }.categoryId)
+        assertEquals("work", next.profiles.first { it.id == "a" }.categoryId)
+        assertEquals(mapOf("work" to "工作"), next.categories)
+        assertEquals(next, ConfigCodec.decode(ConfigCodec.encode(next)))
+    }
 }

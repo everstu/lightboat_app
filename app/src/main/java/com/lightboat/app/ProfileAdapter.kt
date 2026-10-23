@@ -1,9 +1,16 @@
 package com.lightboat.app
 
 import android.annotation.SuppressLint
+import android.graphics.Typeface
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.ImageSpan
+import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.appcompat.widget.PopupMenu
 import androidx.recyclerview.widget.RecyclerView
 import com.lightboat.app.databinding.ItemProfileBinding
@@ -41,8 +48,21 @@ class ProfileAdapter(
     }
 
     override fun getItemCount() = profiles.size
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
-        Holder(ItemProfileBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+        val row = ItemProfileBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+        row.root.clipToOutline = true
+        fun iconLabel(label: Int, icon: Int): CharSequence {
+            val drawable = requireNotNull(AppCompatResources.getDrawable(parent.context, icon))
+            val size = (16 * parent.resources.displayMetrics.density).toInt()
+            drawable.setBounds(0, 0, size, size)
+            return SpannableString("\uFFFC  ${parent.context.getString(label)}").apply {
+                setSpan(ImageSpan(drawable, ImageSpan.ALIGN_BOTTOM), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+        row.openProfile.text = iconLabel(R.string.switch_profile, R.drawable.ic_profile_open)
+        row.editProfile.text = iconLabel(R.string.edit, R.drawable.ic_profile_edit)
+        return Holder(row)
+    }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val profile = profiles[position]
@@ -62,19 +82,38 @@ class ProfileAdapter(
         row.topProfile.setOnClickListener { moveToTop(profile) }
         row.root.isActivated = profile.id == currentId
         row.profileUrl.text = profile.url.substringBefore('?').substringBefore('#')
-        row.profileScript.text = if (profile.scripts.isEmpty()) context.getString(R.string.profile_script_none)
-        else context.getString(R.string.profile_scripts_count, profile.scripts.count { it.enabled }, profile.scripts.size)
+        val enabledScripts = profile.scripts.count { it.enabled }
+        val summary = context.getString(R.string.profile_scripts_compact, enabledScripts, profile.scripts.size)
+        row.profileScript.text = SpannableString(summary).apply {
+            val start = summary.indexOf('：') + 1
+            setSpan(StyleSpan(Typeface.BOLD), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(ForegroundColorSpan(context.getColor(R.color.ink)), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        row.profileScript.contentDescription = context.getString(R.string.profile_scripts_count, enabledScripts, profile.scripts.size)
+        row.profileScriptStatus.setText(when {
+            profile.scripts.isEmpty() -> R.string.profile_scripts_absent
+            enabledScripts == 0 -> R.string.profile_scripts_off
+            else -> R.string.profile_scripts_enabled
+        })
+        row.profileScriptStatus.setTextColor(context.getColor(if (enabledScripts > 0) R.color.accent else R.color.muted))
         row.profileBadge.text = context.getString(when (profile.platform) {
                 BrowserPlatform.APPLE -> R.string.platform_apple
                 BrowserPlatform.ANDROID -> R.string.platform_android
                 BrowserPlatform.WINDOWS -> R.string.platform_windows
             })
+        row.profileBadge.setCompoundDrawablesRelativeWithIntrinsicBounds(
+            if (profile.platform == BrowserPlatform.ANDROID) R.drawable.ic_profile_android else 0, 0, 0, 0)
         row.profileState.text = when (profile.id) {
             currentId -> context.getString(R.string.current_profile)
             lastId -> context.getString(R.string.last_profile)
             else -> ""
         }
-        row.profileState.visibility = if (row.profileState.text.isEmpty()) View.GONE else View.VISIBLE
+        val hasState = row.profileState.text.isNotEmpty()
+        row.profileState.visibility = if (hasState) View.VISIBLE else View.GONE
+        row.profileState.isActivated = row.root.isActivated
+        val stateColor = context.getColor(if (row.root.isActivated) R.color.accent else R.color.muted)
+        row.profileState.setTextColor(stateColor)
+        row.profileState.background.mutate().apply { setTint(stateColor); alpha = 96 }
         row.openProfile.contentDescription = context.getString(R.string.profile_open_description, profile.name)
         row.editProfile.contentDescription = context.getString(R.string.profile_edit_description, profile.name)
         row.openProfile.setOnClickListener { open(profile) }

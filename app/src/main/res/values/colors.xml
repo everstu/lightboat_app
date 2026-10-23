@@ -12,6 +12,9 @@
     <color name="log_paused_badge">#F8EDD8</color>
     <color name="config_soft">#E8EFE8</color>
     <color name="config_selected">#EEF5EF</color>
+    <color name="script_usage_stroke">#BDD9CC</color>
+    <color name="script_usage_zero_fill">#F2F4F6</color>
+    <color name="script_usage_zero_stroke">#DCE1E7</color>
     <color name="category_badge_fill">#EDF0FA</color>
     <color name="category_badge_ink">#4D6090</color>
 </resources>

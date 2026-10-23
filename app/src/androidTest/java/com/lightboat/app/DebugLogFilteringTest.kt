@@ -42,6 +42,14 @@ class DebugLogFilteringTest {
         DebugLog.event("media", "load status=200 beta")
         scenario.onActivity { dialog = DebugLogDialog(it).apply { show() } }
         waitFor("Initial rows were not loaded") { count() == 3 }
+        if (InstrumentationRegistry.getArguments().getString("captureUi") == "true") {
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            instrumentation.waitForIdleSync()
+            instrumentation.uiAutomation.takeScreenshot()?.let { bitmap ->
+                File(context.getExternalFilesDir(null), "debug-logs-compact.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                bitmap.recycle()
+            }
+        }
     }
 
     @After fun tearDown() {

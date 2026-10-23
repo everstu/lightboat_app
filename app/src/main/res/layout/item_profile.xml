@@ -1,45 +1,74 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="8dp"
-    android:orientation="vertical" android:background="@drawable/bg_profile" android:paddingHorizontal="14dp" android:paddingVertical="10dp">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-        <TextView android:id="@+id/profileName" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
-            android:textSize="17sp" android:textStyle="bold" android:textColor="@color/ink" android:maxLines="1" android:ellipsize="end" />
-        <ImageButton android:id="@+id/favoriteProfile" android:layout_width="48dp" android:layout_height="48dp"
-            android:src="@drawable/ic_star_outline"
-            android:contentDescription="@string/profile_favorite" android:background="?attr/selectableItemBackgroundBorderless" />
-        <ImageButton android:id="@+id/topProfile" android:layout_width="48dp" android:layout_height="48dp"
-            android:src="@drawable/ic_move_top" android:contentDescription="@string/profile_move_top"
-            android:background="?attr/selectableItemBackgroundBorderless" />
-        <ImageButton android:id="@+id/profileMore" android:layout_width="48dp" android:layout_height="48dp"
-            android:src="@drawable/ic_more" android:contentDescription="@string/profile_more" android:background="?attr/selectableItemBackgroundBorderless" />
+    android:background="@drawable/bg_profile">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:paddingHorizontal="14dp" android:paddingBottom="6dp" android:clipToPadding="false">
+        <com.lightboat.app.ProfileHeaderRow android:id="@+id/profileHeader" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginEnd="-7dp">
+            <TextView android:id="@+id/profileName" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textSize="17sp" android:textStyle="bold" android:textColor="@color/ink" android:maxLines="1" android:ellipsize="end" />
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content">
+            <ImageButton android:id="@+id/favoriteProfile" android:layout_width="48dp" android:layout_height="48dp"
+                android:src="@drawable/ic_star_outline" android:contentDescription="@string/profile_favorite"
+                android:background="?attr/selectableItemBackgroundBorderless" />
+            <ImageButton android:id="@+id/topProfile" android:layout_width="48dp" android:layout_height="48dp"
+                android:src="@drawable/ic_move_top" android:contentDescription="@string/profile_move_top"
+                android:background="?attr/selectableItemBackgroundBorderless" />
+            <ImageButton android:id="@+id/profileMore" android:layout_width="48dp" android:layout_height="48dp"
+                android:src="@drawable/ic_more" android:contentDescription="@string/profile_more"
+                android:background="?attr/selectableItemBackgroundBorderless" />
+            </LinearLayout>
+            <TextView android:id="@+id/profileState" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:minWidth="48dp" android:paddingHorizontal="3dp"
+                android:background="@drawable/bg_profile_state_tag" android:gravity="center"
+                android:includeFontPadding="false" android:singleLine="true"
+                android:clickable="false" android:longClickable="false" android:focusable="false"
+                android:textSize="11sp" android:textStyle="bold" android:textColor="@color/accent" android:visibility="gone" />
+        </com.lightboat.app.ProfileHeaderRow>
+        <com.lightboat.app.ProfileMetadataRow android:id="@+id/profileMeta"
+            android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:id="@+id/profileTags" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:gravity="center_vertical">
+                <TextView android:id="@+id/profileBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:background="@drawable/bg_profile_platform_badge" android:paddingHorizontal="8dp" android:paddingVertical="3dp"
+                    android:drawablePadding="4dp" android:textSize="11sp" android:textColor="@color/accent"
+                    android:maxLines="1" />
+                <TextView android:id="@+id/profileCategory" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp" android:background="@drawable/bg_profile_category_badge"
+                    android:paddingHorizontal="8dp" android:paddingVertical="3dp" android:textSize="11sp"
+                    android:textColor="@color/category_badge_ink" android:maxWidth="136dp" android:maxLines="1" android:ellipsize="end" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/profileScriptBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:gravity="center_vertical" android:background="@drawable/bg_profile_script_badge"
+                android:paddingHorizontal="6dp" android:paddingVertical="3dp">
+                <ImageView android:layout_width="14dp" android:layout_height="14dp" android:src="@drawable/ic_profile_code"
+                    android:importantForAccessibility="no" />
+                <TextView android:id="@+id/profileScript" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp" android:textSize="11sp" android:textColor="@color/muted" android:maxLines="1" />
+                <TextView android:id="@+id/profileScriptStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginStart="5dp" android:paddingHorizontal="4dp" android:paddingVertical="1dp"
+                    android:background="@drawable/bg_config_soft" android:textSize="11sp" android:textColor="@color/accent"
+                    android:maxLines="1" />
+            </LinearLayout>
+        </com.lightboat.app.ProfileMetadataRow>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:gravity="center_vertical">
+            <ImageView android:layout_width="24dp" android:layout_height="24dp" android:padding="4dp"
+                android:background="@drawable/bg_profile_script_badge" android:src="@drawable/ic_profile_globe"
+                android:importantForAccessibility="no" />
+            <TextView android:id="@+id/profileUrl" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:textSize="14sp" android:textColor="@color/ink"
+                android:maxLines="1" android:ellipsize="middle" />
+        </LinearLayout>
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="6dp" android:background="@color/line" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"
+            android:gravity="center_vertical" android:baselineAligned="false">
+            <Button android:id="@+id/openProfile" style="@style/ProfileCardAction.Primary" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="48dp" android:text="@string/switch_profile" />
+            <Button android:id="@+id/editProfile" style="@style/ProfileCardAction.Secondary" android:layout_width="0dp"
+                android:layout_weight="1" android:layout_height="wrap_content" android:minHeight="48dp"
+                android:layout_marginStart="10dp" android:text="@string/edit" />
+        </LinearLayout>
     </LinearLayout>
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-        <TextView android:id="@+id/profileBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:background="@drawable/bg_config_soft" android:paddingHorizontal="8dp" android:paddingVertical="3dp"
-            android:textSize="11sp" android:textColor="@color/accent" />
-        <FrameLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="6dp">
-            <TextView android:id="@+id/profileCategory" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:background="@drawable/bg_category_badge" android:paddingHorizontal="8dp" android:paddingVertical="3dp"
-                android:textSize="11sp" android:textColor="@color/category_badge_ink" android:maxWidth="136dp" android:maxLines="1" android:ellipsize="end" />
-        </FrameLayout>
-        <TextView android:id="@+id/profileState" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginStart="6dp" android:textSize="11sp" android:textColor="@color/accent" android:textStyle="bold"
-            android:maxLines="1" />
-    </LinearLayout>
-    <TextView android:id="@+id/profileUrl" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="8dp" android:textSize="14sp" android:textColor="@color/ink"
-        android:maxLines="1" android:ellipsize="middle" />
-    <TextView android:id="@+id/profileScript" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="4dp" android:textSize="12sp" android:textColor="@color/muted" android:maxLines="1" android:ellipsize="middle" />
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"
-        android:gravity="center">
-        <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
-        <Button android:id="@+id/openProfile" style="@style/ProfileCardAction.Primary" android:layout_width="wrap_content"
-            android:layout_height="52dp" android:text="@string/switch_profile" />
-        <Space android:layout_width="24dp" android:layout_height="1dp" android:layout_weight="1" />
-        <Button android:id="@+id/editProfile" style="@style/ProfileCardAction.Secondary" android:layout_width="wrap_content"
-            android:layout_height="52dp" android:text="@string/edit" />
-        <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
-    </LinearLayout>
-</LinearLayout>
+</FrameLayout>

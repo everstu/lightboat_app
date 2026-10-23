@@ -46,7 +46,7 @@ internal class ProfileNoteDialog(
             binding.noteText.isFocusableInTouchMode = false
             binding.copyNote.visibility = View.GONE
             // The only action should read as the dialog's primary action.
-            binding.closeNote.setBackgroundResource(R.drawable.bg_config_primary)
+            binding.closeNote.setBackgroundResource(R.drawable.bg_compact_action_primary)
             binding.closeNote.setTextColor(context.getColor(R.color.white))
         }
     }
@@ -111,22 +111,22 @@ internal class ProfileNoteDialog(
     }
 
     private fun applySpacing(compact: Boolean, tight: Boolean) {
-        val horizontal = DialogLayout.dp(context, if (tight) 18 else if (compact) 20 else 24)
-        val vertical = DialogLayout.dp(context, if (tight) 8 else if (compact) 12 else 24)
+        val horizontal = DialogLayout.dp(context, if (tight) 12 else 16)
+        val vertical = DialogLayout.dp(context, if (tight) 8 else if (compact) 12 else 16)
         binding.root.setPadding(horizontal, vertical, horizontal, vertical)
 
         (binding.noteCard.layoutParams as? ViewGroup.MarginLayoutParams)?.let {
-            it.topMargin = DialogLayout.dp(context, if (tight) 8 else if (compact) 10 else 18)
+            it.topMargin = DialogLayout.dp(context, if (tight || compact) 8 else 12)
             binding.noteCard.layoutParams = it
         }
-        val cardPadding = DialogLayout.dp(context, if (tight) 8 else if (compact) 10 else 16)
+        val cardPadding = DialogLayout.dp(context, if (tight || compact) 8 else 12)
         binding.noteCard.setPadding(cardPadding, cardPadding, cardPadding, cardPadding)
 
         (binding.noteActions.layoutParams as? ViewGroup.MarginLayoutParams)?.let {
-            it.topMargin = DialogLayout.dp(context, if (tight) 8 else if (compact) 12 else 24)
+            it.topMargin = DialogLayout.dp(context, if (tight || compact) 8 else 12)
             binding.noteActions.layoutParams = it
         }
-        val buttonHeight = DialogLayout.dp(context, if (tight) 48 else 52)
+        val buttonHeight = context.resources.getDimensionPixelSize(R.dimen.ui_touch_target)
         binding.closeNote.minimumHeight = buttonHeight
         binding.copyNote.minimumHeight = buttonHeight
     }
