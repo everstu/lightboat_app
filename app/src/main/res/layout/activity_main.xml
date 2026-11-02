@@ -247,8 +247,13 @@
                             android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginTop="@dimen/ui_item_gap" android:text="@string/profiles_reset_filters" />
                     </LinearLayout>
                 </FrameLayout>
-                <TextView android:id="@+id/versionLabel" android:layout_width="match_parent" android:layout_height="32dp"
-                    android:paddingHorizontal="@dimen/ui_page_inset" android:gravity="center_vertical" android:textColor="@color/muted" android:textSize="11sp" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="@dimen/ui_page_inset" android:paddingEnd="96dp">
+                    <TextView android:id="@+id/versionLabel" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                        android:textColor="@color/muted" android:textSize="11sp" />
+                    <Button android:id="@+id/checkUpdate" style="@style/ConfigAction" android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" android:text="@string/update_check" />
+                </LinearLayout>
             </LinearLayout>
             <LinearLayout android:id="@+id/profileFloatingActions" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_gravity="bottom|end" android:layout_marginEnd="10dp" android:layout_marginBottom="@dimen/ui_item_gap"

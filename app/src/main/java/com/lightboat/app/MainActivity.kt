@@ -202,6 +202,7 @@ class MainActivity : AppCompatActivity() {
         binding.addScript.setOnClickListener { addDraftScript() }
         binding.scriptLibrary.setOnClickListener { showScriptLibrary() }
         binding.webDavButton.setOnClickListener { showWebDav() }
+        binding.checkUpdate.setOnClickListener { showNativeDialog(AppUpdateDialog(this)) }
         binding.applePlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.APPLE, true) }
         binding.androidPlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.ANDROID, true) }
         binding.windowsPlatformButton.setOnClickListener { selectPlatform(BrowserPlatform.WINDOWS, true) }
