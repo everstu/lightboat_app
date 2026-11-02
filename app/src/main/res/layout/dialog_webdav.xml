@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+    android:padding="@dimen/ui_page_inset" android:background="@drawable/bg_config_dialog">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/webdavTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/webdav_title" android:textSize="@dimen/ui_dialog_title" android:textStyle="bold" android:textColor="@color/ink" />
+        <ImageButton android:id="@+id/closeWebdav" android:layout_width="48dp" android:layout_height="48dp"
+            android:src="@drawable/ic_close" app:tint="@color/muted" android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="@string/import_cancel" />
+    </LinearLayout>
+    <ScrollView android:id="@+id/webdavScroll" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_weight="1" android:layout_marginTop="6dp" android:scrollbars="none">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/webdav_description"
+                android:textSize="13sp" android:textColor="@color/muted" android:lineSpacingExtra="3dp" />
+            <LinearLayout android:id="@+id/webdavForm" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/ui_section_gap" android:orientation="vertical">
+                <TextView style="@style/FieldLabel" android:text="@string/webdav_directory_label" android:labelFor="@id/webdavDirectory" />
+                <EditText android:id="@+id/webdavDirectory" style="@style/UrlField" android:hint="@string/webdav_directory_hint"
+                    android:maxLength="8192" android:imeOptions="actionNext|flagNoExtractUi" android:importantForAutofill="no" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"
+                    android:text="@string/webdav_directory_note" android:textSize="12sp" android:textColor="@color/muted" />
+                <TextView style="@style/FieldLabel" android:text="@string/webdav_username_label" android:layout_marginTop="@dimen/ui_item_gap" android:labelFor="@id/webdavUsername" />
+                <EditText android:id="@+id/webdavUsername" style="@style/UrlField" android:inputType="textNoSuggestions"
+                    android:maxLength="1024" android:hint="@string/webdav_username_hint" android:imeOptions="actionNext|flagNoExtractUi" android:importantForAutofill="no" />
+                <TextView style="@style/FieldLabel" android:text="@string/webdav_password_label" android:layout_marginTop="@dimen/ui_item_gap" android:labelFor="@id/webdavPassword" />
+                <EditText android:id="@+id/webdavPassword" style="@style/UrlField" android:inputType="textPassword"
+                    android:maxLength="4096" android:hint="@string/webdav_password_hint" android:imeOptions="actionDone|flagNoExtractUi" android:importantForAutofill="no" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_item_gap">
+                    <Button android:id="@+id/testWebdav" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:text="@string/webdav_test" android:textSize="13sp" />
+                    <Button android:id="@+id/saveWebdav" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginStart="@dimen/ui_item_gap" android:text="@string/webdav_save" android:textSize="13sp" />
+                </LinearLayout>
+            </LinearLayout>
+            <LinearLayout android:id="@+id/webdavActions" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:layout_marginTop="@dimen/ui_section_gap">
+                <TextView style="@style/FieldLabel" android:text="@string/webdav_actions_title" />
+                <com.lightboat.app.BackupOptionsView android:id="@+id/webdavBackupOptions" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="10dp" />
+                <TextView android:id="@+id/webdavHistory" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:textSize="12sp" android:textColor="@color/muted" android:lineSpacingExtra="3dp" />
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_item_gap">
+                    <Button android:id="@+id/uploadWebdav" style="@style/ConfigPrimary" android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:text="@string/webdav_upload" android:textSize="13sp" />
+                    <Button android:id="@+id/downloadWebdav" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+                        android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginStart="@dimen/ui_item_gap" android:text="@string/webdav_download" android:textSize="13sp" />
+                </LinearLayout>
+            </LinearLayout>
+            <LinearLayout android:id="@+id/webdavPreview" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/ui_section_gap" android:orientation="vertical" android:visibility="gone" android:padding="@dimen/ui_field_inset" android:background="@drawable/bg_config_soft">
+                <TextView android:id="@+id/webdavPreviewTitle" style="@style/FieldLabel" android:textSize="17sp" />
+                <TextView android:id="@+id/webdavPreviewDetails" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp" android:textColor="@color/muted" android:textSize="13sp" android:lineSpacingExtra="4dp" />
+                <com.lightboat.app.BackupOptionsView android:id="@+id/webdavRestoreOptions" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_item_gap" android:visibility="gone" />
+                <Button android:id="@+id/webdavConfirm" style="@style/ConfigPrimary" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginTop="@dimen/ui_section_gap" android:text="@string/webdav_restore_confirm" android:textSize="13sp" />
+                <Button android:id="@+id/webdavPreviewBack" style="@style/ConfigAction" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginTop="4dp" android:text="@string/import_cancel" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_item_gap"
+                android:text="@string/webdav_scope_note" android:textColor="@color/muted" android:textSize="12sp" android:lineSpacingExtra="3dp" />
+        </LinearLayout>
+    </ScrollView>
+    <ProgressBar android:id="@+id/webdavProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent"
+        android:layout_height="3dp" android:layout_marginTop="@dimen/ui_item_gap" android:indeterminate="true" android:visibility="gone" />
+    <TextView android:id="@+id/webdavStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ui_item_gap" android:text="@string/webdav_ready" android:textColor="@color/muted" android:textSize="12sp" android:accessibilityLiveRegion="polite" />
+</LinearLayout>

@@ -2,15 +2,15 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:orientation="vertical" android:background="@color/paper">
+    android:orientation="vertical" android:background="@color/paper" android:focusableInTouchMode="true">
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:paddingHorizontal="20dp" android:paddingTop="12dp">
+        android:orientation="vertical" android:paddingHorizontal="@dimen/ui_page_inset" android:paddingTop="@dimen/ui_item_gap">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:gravity="center_vertical">
             <TextView android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:text="@string/debug_logs"
-                android:textSize="26sp" android:textStyle="bold" android:textColor="@color/ink" />
+                android:textSize="@dimen/ui_dialog_title" android:textStyle="bold" android:textColor="@color/ink" />
             <ImageButton android:id="@+id/closeLogs" android:layout_width="48dp" android:layout_height="48dp"
                 android:src="@drawable/ic_close" app:tint="@color/ink"
                 android:background="?attr/selectableItemBackgroundBorderless" android:contentDescription="@string/close" />
@@ -18,7 +18,7 @@
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:text="@string/logs_description" android:textSize="13sp" android:textColor="@color/muted" />
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="18dp" android:gravity="center_vertical">
+            android:layout_marginTop="10dp" android:gravity="center_vertical">
             <TextView android:id="@+id/logStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:background="@drawable/bg_log_badge" android:paddingHorizontal="12dp" android:paddingVertical="6dp"
                 android:text="@string/logs_live" android:textSize="12sp" android:textStyle="bold" android:textColor="@color/accent"
@@ -27,14 +27,36 @@
                 android:layout_weight="1" android:gravity="end" android:textSize="12sp" android:textColor="@color/muted" />
         </LinearLayout>
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginTop="10dp" android:gravity="center_vertical">
-            <Button android:id="@+id/pauseLogs" android:layout_width="0dp" android:layout_height="52dp"
+            android:layout_marginTop="@dimen/ui_item_gap" android:gravity="center_vertical">
+            <EditText android:id="@+id/logQuery" android:layout_width="0dp" android:layout_height="48dp"
+                android:layout_weight="1" android:background="@drawable/bg_input_surface" android:paddingHorizontal="14dp"
+                android:textSize="@dimen/ui_label_text" android:textColor="@color/ink" android:textColorHint="@color/muted"
+                android:hint="@string/logs_search_hint" android:inputType="text|textNoSuggestions"
+                android:singleLine="true" android:maxLength="200" android:imeOptions="actionSearch"
+                android:importantForAutofill="no" android:contentDescription="@string/logs_search_hint" />
+            <Button android:id="@+id/resetLogFilters" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target"
+                android:layout_marginStart="6dp" android:minWidth="48dp" android:paddingHorizontal="8dp"
+                android:text="@string/logs_reset_filters" android:textSize="13sp" android:textColor="@color/accent"
+                style="?attr/borderlessButtonStyle" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" android:gravity="center_vertical">
+            <Button android:id="@+id/logSource" style="@style/CategoryFilter"
+                android:layout_width="0dp" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_weight="1.2"
+                android:text="@string/logs_all_sources" android:textSize="13sp" />
+            <Button android:id="@+id/logLevel" style="@style/CategoryFilter"
+                android:layout_width="0dp" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_weight="1"
+                android:layout_marginStart="10dp" android:text="@string/logs_all_levels" android:textSize="13sp" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="2dp" android:gravity="center_vertical">
+            <Button android:id="@+id/pauseLogs" android:layout_width="0dp" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target"
                 android:layout_weight="1" android:text="@string/logs_pause" android:textColor="@color/accent"
                 android:textSize="13sp" android:paddingHorizontal="4dp" style="?attr/borderlessButtonStyle" />
-            <Button android:id="@+id/copyLogs" android:layout_width="0dp" android:layout_height="52dp"
+            <Button android:id="@+id/copyLogs" android:layout_width="0dp" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target"
                 android:layout_weight="1" android:text="@string/logs_copy" android:textColor="@color/ink"
                 android:textSize="13sp" android:paddingHorizontal="4dp" style="?attr/borderlessButtonStyle" />
-            <Button android:id="@+id/clearLogs" android:layout_width="0dp" android:layout_height="52dp"
+            <Button android:id="@+id/clearLogs" android:layout_width="0dp" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target"
                 android:layout_weight="1" android:text="@string/logs_clear" android:textColor="@color/error"
                 android:textSize="13sp" android:paddingHorizontal="4dp" style="?attr/borderlessButtonStyle" />
         </LinearLayout>
@@ -45,24 +67,24 @@
     <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
         <androidx.recyclerview.widget.RecyclerView android:id="@+id/logList"
             android:layout_width="match_parent" android:layout_height="match_parent"
-            android:paddingHorizontal="16dp" android:paddingVertical="12dp"
+            android:paddingHorizontal="@dimen/ui_field_inset" android:paddingVertical="@dimen/ui_item_gap"
             android:clipToPadding="false" android:scrollbars="vertical" />
         <LinearLayout android:id="@+id/emptyLogs" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:gravity="center" android:orientation="vertical" android:padding="24dp">
+            android:gravity="center" android:orientation="vertical" android:padding="@dimen/ui_page_inset">
             <TextView android:id="@+id/emptyTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="@string/logs_loading" android:textColor="@color/ink" android:textSize="18sp" android:textStyle="bold" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            <TextView android:id="@+id/emptyHint" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginTop="8dp" android:text="@string/logs_empty_hint"
                 android:textColor="@color/muted" android:textSize="13sp" />
         </LinearLayout>
     </FrameLayout>
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:gravity="center_vertical" android:paddingHorizontal="20dp" android:minHeight="56dp">
+        android:gravity="center_vertical" android:paddingHorizontal="@dimen/ui_page_inset" android:minHeight="@dimen/ui_touch_target">
         <TextView android:id="@+id/logHint" android:layout_width="0dp" android:layout_height="wrap_content"
-            android:layout_weight="1" android:paddingVertical="12dp" android:text="@string/logs_following"
+            android:layout_weight="1" android:paddingVertical="@dimen/ui_item_gap" android:text="@string/logs_following"
             android:textSize="12sp" android:textColor="@color/muted" />
-        <Button android:id="@+id/latestLogs" android:layout_width="wrap_content" android:layout_height="48dp"
+        <Button android:id="@+id/latestLogs" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target"
             android:text="@string/logs_latest" android:textSize="12sp" android:textColor="@color/accent"
             android:visibility="gone" style="?attr/borderlessButtonStyle" />
     </LinearLayout>

@@ -40,8 +40,6 @@ internal class ExitConfirmationDialog(
     }
 
     override fun updateLayout() {
-        val density = context.resources.displayMetrics.density
-        val width = minOf(context.resources.displayMetrics.widthPixels - (48 * density).toInt(), (420 * density).toInt())
-        window?.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT)
+        window?.setLayout(DialogLayout.width(context, maxWidthDp = 420, marginDp = 48), WindowManager.LayoutParams.WRAP_CONTENT)
     }
 }

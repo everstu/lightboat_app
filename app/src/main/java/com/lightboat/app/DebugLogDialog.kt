@@ -13,6 +13,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDialog
@@ -21,6 +23,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnNextLayout
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -33,6 +36,8 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
     AppCompatDialog(activity, R.style.Theme_Lightboat_DebugLogs) {
     private lateinit var binding: DialogDebugLogsBinding
     private val entries = LogAdapter()
+    private val allRows = mutableListOf<DebugLogEntry>()
+    private var filter = DebugLogFilter()
     private val main = Handler(Looper.getMainLooper())
     private val reader = Executors.newSingleThreadExecutor()
     private var cursor: DebugLog.Cursor? = null
@@ -45,7 +50,9 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
     private var paused = false
     private var followTail = true
     private var readFailed = false
+    private var loaded = false
     private val refresh = Runnable { refreshLogs() }
+    private val filterRefresh = Runnable { changeFilters(filter.copy(query = binding.logQuery.text.toString())) }
     private val lifecycleObserver = LifecycleEventObserver { _, event ->
         when (event) {
             Lifecycle.Event.ON_START -> { active = true; refreshLogs() }
@@ -61,7 +68,8 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
         window?.let { WindowCompat.setDecorFitsSystemWindows(it, false) }
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
             insets
         }
         binding.logList.layoutManager = LinearLayoutManager(context)
@@ -96,6 +104,38 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
             updateStatus()
         }
         binding.clearLogs.setOnClickListener { clearLogs() }
+        binding.logQuery.doAfterTextChanged {
+            main.removeCallbacks(filterRefresh)
+            main.postDelayed(filterRefresh, 160L)
+        }
+        binding.logQuery.setOnEditorActionListener { view, action, _ ->
+            if (action != EditorInfo.IME_ACTION_SEARCH) false else {
+                main.removeCallbacks(filterRefresh)
+                changeFilters(filter.copy(query = binding.logQuery.text.toString()))
+                (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                    .hideSoftInputFromWindow(view.windowToken, 0)
+                view.clearFocus()
+                true
+            }
+        }
+        binding.logSource.setOnClickListener { anchor ->
+            val choices = listOf(CategoryChoice(null, context.getString(R.string.logs_all_sources))) +
+                (allRows.map { it.source } + listOfNotNull(filter.source)).distinct().sorted().map { CategoryChoice(it, it) }
+            showCategoryChoices(anchor, choices, filter.source) {
+                changeFilters(filter.copy(query = binding.logQuery.text.toString(), source = it.id))
+            }
+        }
+        binding.logLevel.setOnClickListener { anchor ->
+            val choices = listOf(CategoryChoice(null, context.getString(R.string.logs_all_levels))) +
+                DebugLogLevel.entries.map { CategoryChoice(it.name, levelLabel(it)) }
+            showCategoryChoices(anchor, choices, filter.level?.name) {
+                changeFilters(filter.copy(query = binding.logQuery.text.toString(), level = it.id?.let(DebugLogLevel::valueOf)))
+            }
+        }
+        binding.resetLogFilters.setOnClickListener {
+            binding.logQuery.setText("")
+            changeFilters(DebugLogFilter())
+        }
         binding.copyLogs.setOnClickListener {
             (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
                 .setPrimaryClip(ClipData.newPlainText(context.getString(R.string.debug_logs), entries.text()))
@@ -130,8 +170,7 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
         reading = true
         reader.execute {
             val result = runCatching { DebugLog.readAfter(from) }
-            val rows = result.getOrNull()?.text?.lineSequence()
-                ?.filter(String::isNotBlank)?.map(::LogEntry)?.toList().orEmpty()
+            val rows = result.getOrNull()?.lines?.filter(String::isNotBlank)?.map(::DebugLogEntry).orEmpty()
             main.post {
                 val isCurrentRead = requestedReadId == readRequestId
                 if (isCurrentRead) reading = false
@@ -142,7 +181,6 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
                         applyUpdate(update, rows)
                     }.onFailure {
                         readFailed = true
-                        if (entries.itemCount == 0) binding.emptyTitle.setText(R.string.logs_read_failed)
                     }
                     updateStatus()
                 }
@@ -151,23 +189,53 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
         }
     }
 
-    private fun applyUpdate(update: DebugLog.Update, rows: List<LogEntry>) {
+    private fun applyUpdate(update: DebugLog.Update, rows: List<DebugLogEntry>) {
+        loaded = true
         cursor = update.cursor
-        binding.emptyTitle.setText(R.string.logs_empty)
         if (!update.reset && rows.isEmpty()) return
         val layout = binding.logList.layoutManager as LinearLayoutManager
         val anchor = layout.findFirstVisibleItemPosition()
         val anchorText = entries.at(anchor)?.raw
         val anchorTop = layout.findViewByPosition(anchor)?.let { layout.getDecoratedTop(it) }
-        if (update.reset) entries.replace(rows) else entries.append(rows)
-        binding.emptyLogs.visibility = if (entries.itemCount == 0) View.VISIBLE else View.GONE
-        if (followTail) scrollToLatest() else if (update.reset && anchorText != null && anchorTop != null) {
+        if (update.reset) allRows.clear()
+        allRows.addAll(rows)
+        val overflow = (allRows.size - DebugLog.MAX_ENTRIES).coerceAtLeast(0)
+        if (overflow > 0) allRows.subList(0, overflow).clear()
+        val visible = rows.filter(filter::matches)
+        val retained = if (overflow > 0) allRows.filter(filter::matches) else visible
+        if (update.reset || overflow > 0) entries.replace(retained) else entries.append(visible)
+        if (followTail && (update.reset || visible.isNotEmpty())) scrollToLatest()
+        else if ((update.reset || overflow > 0) && anchorText != null && anchorTop != null && retained.isNotEmpty()) {
             // File trimming can remove old rows. Keep a surviving row at its old offset,
             // or stay at the oldest remaining row instead of jumping to the tail.
-            val restored = rows.indexOfFirst { it.raw == anchorText }.coerceAtLeast(0)
+            val restored = retained.indexOfFirst { it.raw == anchorText }.coerceAtLeast(0)
             layout.scrollToPositionWithOffset(restored, anchorTop - binding.logList.paddingTop)
         }
     }
+
+    private fun changeFilters(next: DebugLogFilter) {
+        main.removeCallbacks(filterRefresh)
+        if (closed || filter == next) return
+        filter = next
+        val layout = binding.logList.layoutManager as LinearLayoutManager
+        val position = layout.findFirstVisibleItemPosition()
+        val anchor = entries.at(position)?.raw
+        val offset = layout.findViewByPosition(position)?.let { layout.getDecoratedTop(it) - binding.logList.paddingTop }
+        val visible = allRows.filter(filter::matches)
+        binding.logList.stopScroll()
+        entries.replace(visible)
+        if (followTail) scrollToLatest() else {
+            val restored = visible.indexOfFirst { it.raw == anchor }.coerceAtLeast(0)
+            layout.scrollToPositionWithOffset(restored, if (visible.getOrNull(restored)?.raw == anchor) offset ?: 0 else 0)
+        }
+        updateStatus()
+    }
+
+    private fun levelLabel(level: DebugLogLevel) = context.getString(when (level) {
+        DebugLogLevel.INFO -> R.string.logs_level_info
+        DebugLogLevel.WARNING -> R.string.logs_level_warning
+        DebugLogLevel.ERROR -> R.string.logs_level_error
+    })
 
     private fun scrollToLatest() {
         val requestedVersion = version
@@ -206,11 +274,11 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
                 if (closed) return@post
                 result.onSuccess {
                     cursor = null
+                    allRows.clear()
                     entries.replace(emptyList())
                     followTail = true
                     readFailed = false
-                    binding.emptyTitle.setText(R.string.logs_empty)
-                    binding.emptyLogs.visibility = View.VISIBLE
+                    loaded = true
                 }.onFailure { toast(R.string.logs_clear_failed) }
                 updateStatus()
                 refreshLogs()
@@ -227,7 +295,22 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
         binding.pauseLogs.isEnabled = !clearing
         binding.clearLogs.isEnabled = !clearing
         binding.copyLogs.isEnabled = !clearing && entries.itemCount > 0
-        binding.logCount.text = context.getString(R.string.logs_count, entries.itemCount)
+        binding.logCount.text = if (filter.active) context.getString(R.string.logs_filtered_count, entries.itemCount, allRows.size)
+            else context.getString(R.string.logs_count, allRows.size)
+        binding.logSource.text = filter.source ?: context.getString(R.string.logs_all_sources)
+        binding.logSource.contentDescription = context.getString(R.string.logs_source_description, binding.logSource.text)
+        binding.logLevel.text = filter.level?.let(::levelLabel) ?: context.getString(R.string.logs_all_levels)
+        binding.logLevel.contentDescription = context.getString(R.string.logs_level_description, binding.logLevel.text)
+        binding.resetLogFilters.isEnabled = filter.active
+        binding.copyLogs.setText(if (filter.active) R.string.logs_copy_filtered else R.string.logs_copy)
+        binding.emptyLogs.visibility = if (entries.itemCount == 0) View.VISIBLE else View.GONE
+        binding.emptyTitle.setText(when {
+            readFailed -> R.string.logs_read_failed
+            !loaded -> R.string.logs_loading
+            filter.active && allRows.isNotEmpty() -> R.string.logs_no_matches
+            else -> R.string.logs_empty
+        })
+        binding.emptyHint.setText(if (filter.active) R.string.logs_no_matches_hint else R.string.logs_empty_hint)
         binding.logHint.setText(when {
             readFailed -> R.string.logs_read_failed
             paused -> R.string.logs_paused_hint
@@ -239,37 +322,20 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
 
     private fun toast(message: Int) = Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 
-    private class LogEntry(val raw: String) {
-        private val match = LINE.matchEntire(raw)
-        val time = match?.groupValues?.get(1).orEmpty()
-        val source = match?.groupValues?.get(2) ?: "app"
-        val message = match?.groupValues?.get(3) ?: raw
-        val color = when {
-            source.contains("error") || source.contains("crash") || message.contains(" failed ") ||
-                message.startsWith("error ", ignoreCase = true) -> R.color.error
-            message.contains("timeout", ignoreCase = true) || message.startsWith("warn ", ignoreCase = true) -> R.color.log_warning
-            else -> R.color.accent
-        }
-
-        companion object {
-            private val LINE = Regex("^\\d{4}-\\d{2}-\\d{2} (\\d{2}:\\d{2}:\\d{2}\\.\\d{3}) \\[([^]]+)] (.*)$")
-        }
-    }
-
     private class LogAdapter : RecyclerView.Adapter<LogAdapter.Holder>() {
         class Holder(val binding: ItemDebugLogBinding) : RecyclerView.ViewHolder(binding.root)
-        private val rows = mutableListOf<LogEntry>()
+        private val rows = mutableListOf<DebugLogEntry>()
         fun at(position: Int) = rows.getOrNull(position)
         fun text() = rows.joinToString("\n", postfix = if (rows.isEmpty()) "" else "\n") { it.raw }
 
         @SuppressLint("NotifyDataSetChanged")
-        fun replace(next: List<LogEntry>) {
+        fun replace(next: List<DebugLogEntry>) {
             rows.clear()
             rows.addAll(next)
             notifyDataSetChanged()
         }
 
-        fun append(next: List<LogEntry>) {
+        fun append(next: List<DebugLogEntry>) {
             val start = rows.size
             rows.addAll(next)
             if (next.isNotEmpty()) notifyItemRangeInserted(start, next.size)
@@ -282,14 +348,18 @@ internal class DebugLogDialog(private val activity: AppCompatActivity) :
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val entry = rows[position]
             val row = holder.binding
-            val color = ContextCompat.getColor(row.root.context, entry.color)
+            val color = ContextCompat.getColor(row.root.context, when (entry.level) {
+                DebugLogLevel.INFO -> R.color.accent
+                DebugLogLevel.WARNING -> R.color.log_warning
+                DebugLogLevel.ERROR -> R.color.error
+            })
             row.entryTime.text = entry.time
             row.entrySource.text = entry.source
             row.entrySource.setTextColor(color)
             row.entryMarker.setBackgroundColor(color)
             row.entryMessage.text = entry.message
             row.entryMessage.setTextColor(ContextCompat.getColor(row.root.context,
-                if (entry.color == R.color.error) R.color.error else R.color.ink))
+                if (entry.level == DebugLogLevel.ERROR) R.color.error else R.color.ink))
         }
     }
 }

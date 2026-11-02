@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+    android:padding="@dimen/ui_page_inset" android:background="@drawable/bg_config_dialog" android:focusableInTouchMode="true">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/renameTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/category_rename_title" android:textColor="@color/ink" android:textSize="@dimen/ui_dialog_title" android:textStyle="bold" />
+        <ImageButton android:id="@+id/closeRename" android:layout_width="48dp" android:layout_height="48dp"
+            android:src="@drawable/ic_close" app:tint="@color/muted" android:contentDescription="@string/close"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+    </LinearLayout>
+    <com.lightboat.app.BoundedScrollView android:id="@+id/renameScroll"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:fillViewport="false" android:clipToPadding="false" android:scrollbars="none">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingBottom="4dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp"
+                android:text="@string/category_rename_description" android:textColor="@color/muted" android:textSize="@dimen/ui_label_text" android:lineSpacingExtra="4dp" />
+            <TextView style="@style/FieldLabel" android:layout_marginTop="@dimen/ui_section_gap" android:text="@string/category_rename_select" android:labelFor="@id/selectCategory" />
+            <Button android:id="@+id/selectCategory" style="@style/CategoryFilter" android:layout_width="match_parent"
+                android:layout_marginTop="10dp" />
+            <TextView style="@style/FieldLabel" android:layout_marginTop="@dimen/ui_section_gap" android:text="@string/category_name_label" android:labelFor="@id/categoryNameInput" />
+            <EditText android:id="@+id/categoryNameInput" style="@style/UrlField" android:inputType="textCapSentences"
+                android:maxLength="60" android:hint="@string/category_name_label" android:imeOptions="actionDone|flagNoExtractUi" />
+            <TextView android:id="@+id/renameHint" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp"
+                android:textColor="@color/muted" android:textSize="12sp" android:lineSpacingExtra="3dp" />
+            <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="@dimen/ui_section_gap"
+                android:background="@color/line" />
+            <Button android:id="@+id/deleteCategory" style="@style/CategoryDeleteAction" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:minHeight="48dp" android:layout_marginTop="@dimen/ui_section_gap"
+                android:text="@string/category_delete_current" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp"
+                android:text="@string/category_delete_note" android:textColor="@color/muted" android:textSize="12sp"
+                android:lineSpacingExtra="3dp" />
+        </LinearLayout>
+    </com.lightboat.app.BoundedScrollView>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_section_gap">
+        <Button android:id="@+id/cancelRename" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:text="@string/import_cancel" />
+        <Button android:id="@+id/saveRename" style="@style/ConfigPrimary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginStart="@dimen/ui_item_gap"
+            android:text="@string/category_save_name" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:padding="@dimen/ui_page_inset" android:background="@drawable/bg_config_dialog">
+        <TextView android:id="@+id/libraryTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:text="@string/script_library" android:textSize="@dimen/ui_dialog_title" android:textStyle="bold" android:textColor="@color/ink" />
+    <androidx.recyclerview.widget.RecyclerView android:id="@+id/libraryList" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginTop="10dp" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_item_gap"
+        android:baselineAligned="false" android:gravity="center_vertical">
+        <Button android:id="@+id/cancelLibrary" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:text="@string/import_cancel" />
+        <Button android:id="@+id/saveLibrary" style="@style/ConfigPrimary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:layout_marginStart="@dimen/ui_item_gap" android:text="@string/save_profile" />
+    </LinearLayout>
+</LinearLayout>

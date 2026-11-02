@@ -27,7 +27,11 @@
       (page.origin !== url.origin && ['origin-when-cross-origin', 'strict-origin-when-cross-origin'].includes(policy))) ref = page.origin + '/';
     const type = (getAttribute.call(node, 'type') || '').split(';')[0].trim().toLowerCase();
     const hls = /\.m3u8$/i.test(url.pathname) || ['application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl', 'audio/x-mpegurl'].includes(type);
-    return base + (hls ? '.m3u8' : '') + '?url=' + encodeURIComponent(url.href) + '&ref=' + encodeURIComponent(ref);
+    const media = node.tagName === 'SOURCE' ? node.parentElement : node;
+    const crossOrigin = getAttribute.call(media || node, 'crossorigin');
+    const credentials = crossOrigin != null && String(crossOrigin).toLowerCase() !== 'use-credentials'
+      ? '&credentials=same-origin&origin=' + encodeURIComponent(page.origin) : '';
+    return base + (hls ? '.m3u8' : '') + '?url=' + encodeURIComponent(url.href) + '&ref=' + encodeURIComponent(ref) + credentials;
   }
   function wrapSrc(prototype) {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, 'src');

@@ -5,19 +5,21 @@ import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayInputStream
 
 class ConfigImportReaderTest {
     private val userAgent = "Test Android Mobile/1.0"
-    private val config = AppConfig.EMPTY.upsert(Profile("first", "工作", "https://example.com/", "https://example.com/app.js"))
+    private val config = AppConfig.EMPTY.upsertScript(SharedScript("shared", "Common script", "https://example.com/app.js"))
+        .upsert(Profile("first", "工作", "https://example.com/", listOf(ProfileScript("shared"))))
     private val json get() = ConfigCodec.encode(config)
 
     @Test fun localUtf8AndBomPreserveConfigurationOrderAndSelection() {
-        val second = Profile("second", "第二组", "https://example.org/", "https://example.org/app.js")
+        val second = Profile("second", "第二组", "https://example.org/", listOf(ProfileScript("shared", enabled = false)))
         val ordered = config.upsert(second, "工作").toggleFavorite(second.id)
-            .reorder(listOf(second.id, "first")).select(second.id)
+            .reorder(listOf(second.id, "first")).setDefault(second.id)
         val bytes = ("\uFEFF" + ConfigCodec.encode(ordered)).toByteArray(Charsets.UTF_8)
         assertEquals(ordered, ConfigImportReader.fromStream(ByteArrayInputStream(bytes), userAgent))
     }
@@ -71,5 +73,20 @@ class ConfigImportReaderTest {
             val error = assertThrows(IllegalArgumentException::class.java) { ConfigImportReader.fromUrl(call, userAgent) }
             assertTrue(error.message.orEmpty().contains("1 MiB"))
         }
+    }
+
+    @Test fun profileNotesSurviveImportAndOverlongNotesFailInsteadOfBeingTruncated() {
+        val note = "导入备注 😀\n第二行\t缩进   "
+        val noted = config.copy(profiles = config.profiles.map { it.copy(note = note) })
+        val imported = ConfigImportReader.fromStream(ConfigCodec.encode(noted).byteInputStream(), userAgent)
+        assertEquals(note, imported.profiles.single().note)
+
+        val root = JSONObject(ConfigCodec.encode(noted))
+        root.getJSONArray("profiles").getJSONObject(0)
+            .put("note", "x".repeat(AppConfig.MAX_PROFILE_NOTE_LENGTH + 1))
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            ConfigImportReader.fromStream(root.toString().byteInputStream(), userAgent)
+        }
+        assertTrue(error.message.orEmpty().contains(AppConfig.MAX_PROFILE_NOTE_LENGTH.toString()))
     }
 }

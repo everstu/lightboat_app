@@ -1,4 +1,19 @@
 <resources>
     <!-- A visual text budget, measured with the actual filter label font. -->
     <dimen name="category_name_max_width">96sp</dimen>
+    <!-- Native surfaces share the same compact rhythm; interactive targets stay at least 48dp. -->
+    <dimen name="ui_page_inset">16dp</dimen>
+    <dimen name="ui_field_inset">12dp</dimen>
+    <dimen name="ui_section_gap">12dp</dimen>
+    <dimen name="ui_item_gap">8dp</dimen>
+    <dimen name="ui_touch_target">48dp</dimen>
+    <dimen name="ui_toolbar_height">52dp</dimen>
+    <dimen name="ui_page_title">22sp</dimen>
+    <dimen name="ui_dialog_title">20sp</dimen>
+    <dimen name="ui_body_text">14sp</dimen>
+    <dimen name="ui_label_text">13sp</dimen>
+    <!-- Shape scale: controls < cards < dialogs. -->
+    <dimen name="ui_radius_control">12dp</dimen>
+    <dimen name="ui_radius_card">18dp</dimen>
+    <dimen name="ui_radius_dialog">24dp</dimen>
 </resources>

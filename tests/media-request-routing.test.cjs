@@ -93,6 +93,21 @@ test('Routes direct HTTP media while preserving the page-visible URL', () => {
   assert.equal(video.writes, 1);
 });
 
+test('Anonymous media and child sources retain their original credential policy through the proxy', () => {
+  const h=harness();
+  const video=h.attach(new h.HTMLMediaElement()); video.attrs.crossorigin='anonymous';
+  video.src='https://cdn.example/master.m3u8';
+  const routed=new URL(video.attrs.src);
+  assert.equal(routed.searchParams.get('credentials'),'same-origin');
+  assert.equal(routed.searchParams.get('origin'),'https://site.example');
+  const source=h.attach(new h.HTMLSourceElement());source.parentElement=video;
+  source.src='https://cdn.example/another.m3u8';
+  assert.equal(new URL(source.attrs.src).searchParams.get('credentials'),'same-origin');
+  video.attrs.crossorigin='use-credentials';video.src='https://cdn.example/signed.m3u8';
+  assert.equal(new URL(video.attrs.src).searchParams.get('credentials'),null);
+  h.flush();assert.equal(video.src,'https://cdn.example/signed.m3u8');
+});
+
 test('Rewrites parser-added HTTP sources once and drains its own mutation', () => {
   const h = harness();
   const node = new h.HTMLSourceElement();

@@ -3,6 +3,7 @@ package com.lightboat.app.userscript
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -15,21 +16,71 @@ import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import com.lightboat.app.AppWebView
 import com.lightboat.app.Profile
+import com.lightboat.app.SharedScript
 import com.lightboat.app.DebugLog
 import org.json.JSONObject
 import java.net.URI
 import java.util.UUID
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.RejectedExecutionException
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
 
-private object ScriptStorage {
+internal object ScriptStorage {
     // One queue preserves write/read order even when a profile recreates its host.
-    val worker = ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS, ArrayBlockingQueue(64),
-        { task -> Thread(task, "userscript-storage").apply { isDaemon = true } },
-        { _, _ -> throw RejectedExecutionException("GM 存储繁忙，请稍后重试") }
-    ).apply { allowCoreThreadTimeOut(true) }
+    private val queue = ScriptStorageQueue()
+    private val main = Handler(Looper.getMainLooper())
+    private val cleanups = ArrayDeque<() -> Unit>() // Main-thread-only; no stored values.
+    private val retryCleanup = Runnable { drainCleanups() }
+    fun submit(task: () -> Unit) = queue.submit(task)
+    /** Called by a background backup worker after the browser hosts have been closed. */
+    fun <T> exclusive(action: () -> T): T {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "不能在主线程等待脚本存储" }
+        val result = java.util.concurrent.CompletableFuture<T>()
+        check(submit { try { result.complete(action()) } catch (error: Throwable) { result.completeExceptionally(error) } }) {
+            "脚本存储繁忙，请稍后重试"
+        }
+        // Once a restore is queued it must finish or roll back, even if the UI closes.
+        var interrupted = false
+        try {
+            while (true) {
+                try { return result.get() }
+                catch (_: InterruptedException) { interrupted = true }
+                catch (error: java.util.concurrent.ExecutionException) { throw (error.cause ?: error) }
+            }
+        } finally { if (interrupted) Thread.currentThread().interrupt() }
+    }
+    fun cleanup(task: () -> Unit) {
+        // A retired document must release its upload even if the request queue is full.
+        // This handler outlives individual hosts; their close() cannot cancel the retry.
+        cleanups.addLast(task)
+        drainCleanups()
+    }
+    /** Acquire the process-wide store for [identity]; every operation is queued. */
+    fun acquireValueStore(context: Context, identity: String, candidates: List<String>): ScriptValueLease {
+        val lease = ScriptValueLease(identity)
+        val appContext = context.applicationContext
+        val accepted = submit {
+            try { ScriptValueRegistry.acquire(appContext, lease, candidates) }
+            catch (error: Throwable) {
+                lease.failure = error.message ?: "GM 存储不可用"
+                DebugLog.event("userscript-store", "store acquire failed (${error.javaClass.simpleName})")
+            }
+        }
+        if (!accepted) lease.failure = "GM 存储繁忙，请稍后重试"
+        return lease
+    }
+    fun releaseValueStore(lease: ScriptValueLease) {
+        if (lease.released) return
+        lease.released = true
+        if (!submit { ScriptValueRegistry.release(lease) }) cleanup { ScriptValueRegistry.release(lease) }
+    }
+    /** Must be called on the storage queue after a backup restore swaps the GM directory. */
+    internal fun invalidateValueStores() = ScriptValueRegistry.invalidateAll()
+    private fun drainCleanups() {
+        main.removeCallbacks(retryCleanup)
+        while (cleanups.isNotEmpty()) {
+            val task = cleanups.first()
+            if (!submit { runCatching(task) }) { main.postDelayed(retryCleanup, 100L); return }
+            cleanups.removeFirst()
+        }
+    }
 }
 
 private object UserScriptAssets {
@@ -50,25 +101,61 @@ class UserScriptHost(
     private val activity: Activity,
     private val view: AppWebView,
     private val profile: Profile,
-    private val bundle: ScriptBundle
+    private val bundle: ScriptBundle,
+    private val script: SharedScript,
+    migrationCandidates: List<String>,
+    private val onExecutionFailure: (String) -> Unit = {},
 ) {
     data class Menu(val doc: String, val id: String, val title: String)
-    private data class Session(val url: String, val reply: JavaScriptReplyProxy)
+    private class Session(val url: String, val reply: JavaScriptReplyProxy, val transport: ScriptMessageTransport) {
+        @Volatile var closed = false
+        var upload: ScriptValueUpload? = null // Serial storage-worker access only.
+        var uploadId: String? = null
+    }
+
+    companion object {
+        // Single operation table: adding an operation only extends this map and the dispatch below.
+        private val VALUE_WRITES = listOf("GM_setValue", "GM.setValue", "GM_setValues", "GM.setValues")
+        // These synchronous reads need the complete startup snapshot. Modern
+        // GM.getValue is deliberately not in this set.
+        private val SNAPSHOT_READ_GRANTS = setOf("GM_getValue", "GM_getValues", "GM_listValues",
+            "GM.getValues", "GM.listValues")
+        private val OPERATIONS: Map<String, List<String>> = mapOf(
+            "setValue" to VALUE_WRITES, "valueBegin" to VALUE_WRITES, "valueChunk" to VALUE_WRITES,
+            "getValue" to listOf("GM.getValue"),
+            "deleteValue" to listOf("GM_deleteValue", "GM.deleteValue", "GM_deleteValues", "GM.deleteValues"),
+            "menuRegister" to listOf("GM_registerMenuCommand", "GM.registerMenuCommand"),
+            "menuRemove" to listOf("GM_unregisterMenuCommand", "GM.unregisterMenuCommand"),
+            "clipboard" to listOf("GM_setClipboard", "GM.setClipboard"),
+            "notification" to listOf("GM_notification", "GM.notification"),
+            "xhr" to listOf("GM_xmlhttpRequest", "GM.xmlHttpRequest"),
+        )
+    }
+
     private val token = UUID.randomUUID().toString()
-    private val store = ScriptValueStore(activity, profile.id + ":" + bundle.metadata.first("namespace") + ":" + bundle.metadata.name)
+    private val bridgeName = "LightboatGM_" + UUID.randomUUID().toString().replace("-", "")
+    val consoleSource = "lightboat-userscript-" + UUID.nameUUIDFromBytes(script.id.toByteArray()).toString() + ".js"
+    private val metadataIdentity = bundle.metadata.first("namespace") + ":" + bundle.metadata.name
+    private val storeLease = ScriptStorage.acquireValueStore(activity,
+        ScriptValueIdentity.canonical(script.id, metadataIdentity), migrationCandidates)
+    private val store get() = storeLease.requireStore()
     private val network = ScriptNetwork(bundle.metadata, profile.userAgent)
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = linkedMapOf<String, Session>()
     private val commands = linkedMapOf<String, Menu>()
+    private val commandListeners = linkedSetOf<() -> Unit>()
     private val logs = ArrayDeque<String>()
     private var alive = true
     val menus get() = commands.values.toList()
+    fun addCommandListener(listener: () -> Unit) { commandListeners.add(listener) }
+    fun removeCommandListener(listener: () -> Unit) { commandListeners.remove(listener) }
+    private fun commandsChanged() { commandListeners.toList().forEach { it() } }
     fun logText() = logs.joinToString("\n").ifEmpty { "暂无脚本日志" }
 
     fun log(level: String, text: String) {
         if (logs.size >= 100) logs.removeFirst()
-        logs.addLast("[$level] ${text.take(8000)}")
-        DebugLog.event("userscript", "$level ${text.take(1000)}")
+        logs.addLast("[${script.name}][$level] ${text.take(8000)}")
+        DebugLog.event("userscript", "$level [${script.name}] ${text.take(1000)}")
     }
 
     fun console(message: ConsoleMessage) {
@@ -86,7 +173,7 @@ class UserScriptHost(
         }
     }
 
-    fun install(): ScriptHandler {
+    fun install(): List<ScriptHandler> {
         val meta = bundle.metadata
         log("info", "${meta.name}：${meta.runAt}；授权 ${meta.grants.joinToString().ifEmpty { "无" }}")
         if (!meta.isUserscript) log("info", "普通 JS 使用 document-start")
@@ -94,7 +181,7 @@ class UserScriptHost(
         if (Regex("""\b(?:eval|Function)\s*\(""").containsMatchIn(bundle.source) || "WebAssembly.compile" in bundle.source) {
             log("warning", "脚本包含动态代码执行；已正常注入，但网页 CSP 可能阻止解密后的代码运行")
         }
-        WebViewCompat.addWebMessageListener(view, "LightboatGM", setOf("*")) { sender, message, origin, main, reply ->
+        WebViewCompat.addWebMessageListener(view, bridgeName, setOf("*")) { sender, message, origin, main, reply ->
             if (!alive || sender !== view || message.type != WebMessageCompat.TYPE_STRING) return@addWebMessageListener
             val raw = message.data ?: return@addWebMessageListener
             if (raw.length > 2 * 1024 * 1024) return@addWebMessageListener
@@ -109,13 +196,19 @@ class UserScriptHost(
             val op = payload.optString("op")
             val id = payload.optString("id")
             if (id.length > 100) return@addWebMessageListener
+            if (op == "bootstrapFailed") {
+                val text = payload.optString("text").take(1000)
+                log("error", text)
+                onExecutionFailure(text)
+                return@addWebMessageListener
+            }
             fun respond(result: Any? = null, error: String? = null) {
                 val response = JSONObject().put("doc", doc).put("id", id)
                 if (error != null) response.put("error", error) else response.put("result", result ?: JSONObject.NULL)
                 runCatching { reply.postMessage(response.toString()) }
             }
             fun storageTask(session: Session, task: () -> Any?, success: (Any?) -> Unit = { respond(it) }) {
-                ScriptStorage.worker.execute {
+                val accepted = ScriptStorage.submit {
                     val result = runCatching(task)
                     handler.post {
                         if (!alive || sessions[doc] !== session) return@post
@@ -125,53 +218,143 @@ class UserScriptHost(
                         })
                     }
                 }
+                if (!accepted) {
+                    log("error", "GM 存储繁忙，请稍后重试")
+                    respond(error = "GM 存储繁忙，请稍后重试")
+                }
             }
             try {
                 if (op == "hello") {
+                    // Document callbacks and frame messages have independent timing.
+                    // A handshake may replace only the same document's session.
+                    val restored = payload.optBoolean("restore", false) || sessions.containsKey(doc)
+                    if (restored) dispose(doc)
                     require(sessions.size < 100) { "脚本 frame 数量超过上限" }
-                    val session = Session(address, reply)
+                    val session = Session(address, reply, ScriptMessageTransport(doc, reply, handler))
                     sessions[doc] = session
-                    val readsValues = meta.grants.any { it.contains("Value") }
-                    if (readsValues && "none" !in meta.grants) storageTask(session, { store.snapshot() })
-                    else respond(JSONObject())
+                    val syncReads = meta.grants.any { it in SNAPSHOT_READ_GRANTS } && "none" !in meta.grants
+                    val lazyReads = !syncReads && meta.permits("GM.getValue")
+                    if (restored || syncReads) {
+                        // Restored documents always use the full snapshot path so their
+                        // caches and local values become current again.
+                        storageTask(session, {
+                            store.forEachEncoded { key, value ->
+                                if (!session.closed) session.transport.sendValue("snapshotValue", key, value)
+                            }
+                            JSONObject().put("readMode", "eager")
+                        })
+                    } else respond(JSONObject().put("readMode", if (lazyReads) "lazy" else "eager"))
                     return@addWebMessageListener
                 }
                 val session = sessions[doc] ?: error("脚本文档已失效")
                 require(sameOrigin(URI(session.url), origin)) { "脚本来源不一致" }
+                if (op == "executionFailed") {
+                    onExecutionFailure(payload.optString("text").take(1000))
+                    return@addWebMessageListener
+                }
+                if (op == "chunkAck") { session.transport.acknowledge(payload.getString("transfer"), payload.getInt("index")); return@addWebMessageListener }
                 if (op == "log") { log(payload.optString("level", "info"), payload.optString("text")); return@addWebMessageListener }
                 if (op == "dispose") { dispose(doc); return@addWebMessageListener }
                 if (op == "abort") { network.abort("$doc:${payload.getString("requestId")}"); return@addWebMessageListener }
-                val permission = when (op) {
-                    "setValue" -> listOf("GM_setValue", "GM.setValue", "GM_setValues", "GM.setValues")
-                    "deleteValue" -> listOf("GM_deleteValue", "GM.deleteValue", "GM_deleteValues", "GM.deleteValues")
-                    "menuRegister" -> listOf("GM_registerMenuCommand", "GM.registerMenuCommand")
-                    "menuRemove" -> listOf("GM_unregisterMenuCommand", "GM.unregisterMenuCommand")
-                    "clipboard" -> listOf("GM_setClipboard", "GM.setClipboard")
-                    "notification" -> listOf("GM_notification", "GM.notification")
-                    "xhr" -> listOf("GM_xmlhttpRequest", "GM.xmlHttpRequest")
-                    else -> error("不支持 GM 操作 $op")
+                if (op == "valueAbort") {
+                    ScriptStorage.cleanup { session.upload?.close(); session.upload = null; session.uploadId = null }
+                    return@addWebMessageListener
                 }
+                val permission = OPERATIONS[op] ?: error("不支持 GM 操作 $op")
                 require(permission.any { meta.permits(it) }) { "@grant 未授权 $op" }
+                fun broadcast(recipients: List<Session>, key: String, value: String?) {
+                    // Run within the write task, before its acknowledgement and the next
+                    // write. No second queue submission can reject or reorder notifications.
+                    recipients.forEach { recipient ->
+                        if (!recipient.closed) runCatching { recipient.transport.sendValue("value", key, value, value == null) }
+                    }
+                }
                 when (op) {
+                    "getValue" -> {
+                        val key = payload.getString("key")
+                        require(key.length <= 512) { "存储键不能超过 512 字符" }
+                        // This response may be several MiB, so send it through the
+                        // existing acknowledged chunk path from the storage worker.
+                        val accepted = ScriptStorage.submit {
+                            val outcome = runCatching { store.encoded(key) }
+                            outcome.fold(onSuccess = { encoded ->
+                                try { session.transport.sendValueResult(id, encoded) }
+                                catch (error: Exception) {
+                                    handler.post {
+                                        if (!alive || session.closed || sessions[doc] !== session) return@post
+                                        log("error", error.message.orEmpty())
+                                        respond(error = error.message ?: "GM 读取失败")
+                                    }
+                                }
+                            }, onFailure = { error ->
+                                handler.post {
+                                    if (!alive || session.closed || sessions[doc] !== session) return@post
+                                    log("error", error.message.orEmpty())
+                                    respond(error = error.message ?: "GM 存储失败")
+                                }
+                            })
+                        }
+                        if (!accepted) {
+                            log("error", "GM 存储繁忙，请稍后重试")
+                            respond(error = "GM 存储繁忙，请稍后重试")
+                        }
+                    }
+                    "valueBegin" -> {
+                        val key = payload.getString("key")
+                        val length = payload.getInt("characters")
+                        require(key.length <= 512 && length in 1..ScriptLimits.MAX_BYTES) { "GM 存储值不能超过 10 MiB" }
+                        storageTask(session, {
+                            check(!session.closed)
+                            session.upload?.close()
+                            session.upload = ScriptValueUpload(activity.cacheDir, key, length)
+                            UUID.randomUUID().toString().also { session.uploadId = it }
+                        }) { result ->
+                            respond(result)
+                            handler.postDelayed({
+                                ScriptStorage.cleanup {
+                                    if (session.uploadId == result) { session.upload?.close(); session.upload = null; session.uploadId = null }
+                                }
+                            }, 120000)
+                        }
+                    }
+                    "valueChunk" -> {
+                        val recipients = sessions.filterKeys { it != doc }.values.toList()
+                        storageTask(session, {
+                            check(!session.closed)
+                            require(payload.getString("transfer") == session.uploadId) { "GM 存储传输已失效" }
+                            val upload = session.upload ?: error("GM 存储传输不存在")
+                            try {
+                                val value = upload.append(payload.getInt("index"), payload.getString("text"), payload.getBoolean("last"))
+                                if (value != null) {
+                                    store.updateEncoded(upload.key, value)
+                                    upload.close(); session.upload = null; session.uploadId = null
+                                    broadcast(recipients, upload.key, value)
+                                }
+                                null
+                            } catch (error: Exception) { upload.close(); session.upload = null; session.uploadId = null; throw error }
+                        })
+                    }
                     "setValue", "deleteValue" -> {
                         val key = payload.getString("key")
                         val value = if (op == "deleteValue") null else payload.getJSONObject("value")
                         if (value != null) require(value.optString("type") in setOf("json", "undefined")) { "存储值格式无效" }
-                        storageTask(session, { store.update(key, value) }) {
-                            sessions.filterKeys { it != doc }.forEach { (other, recipient) ->
-                                runCatching { recipient.reply.postMessage(JSONObject().put("doc", other).put("event", "value")
-                                    .put("key", key).put("value", value ?: JSONObject.NULL).put("deleted", value == null).toString()) }
-                            }
-                            respond()
-                        }
+                        val encoded = value?.toString()
+                        val recipients = sessions.filterKeys { it != doc }.values.toList()
+                        storageTask(session, {
+                            check(!session.closed)
+                            store.updateEncoded(key, encoded)
+                            broadcast(recipients, key, encoded)
+                            null
+                        })
                     }
                     "menuRegister" -> {
                         require(commands.size < 100) { "脚本菜单数量超过上限" }
                         val menuId = payload.getString("menuId").take(100)
                         commands["$doc:$menuId"] = Menu(doc, menuId, payload.getString("title").take(100))
+                        commandsChanged()
                         respond()
                     }
-                    "menuRemove" -> { commands.remove("$doc:${payload.getString("menuId")}"); respond() }
+                    "menuRemove" -> { commands.remove("$doc:${payload.getString("menuId")}"); commandsChanged(); respond() }
                     "clipboard" -> {
                         check(view.isShown && activity.hasWindowFocus() && view.consumeClipboardGesture()) { "复制需要用户点击操作" }
                         val text = payload.getString("text")
@@ -182,9 +365,13 @@ class UserScriptHost(
                     }
                     "notification" -> { Toast.makeText(activity, payload.getString("text").take(2000), Toast.LENGTH_LONG).show(); respond() }
                     "xhr" -> network.execute("$doc:$id", address, payload) { kind, result, error ->
+                        if (kind == "chunk") {
+                            if (!session.closed && result != null) session.transport.send(JSONObject().put("doc", doc).put("id", id)
+                                .put("event", "xhrChunk").put("result", result))
+                            return@execute
+                        }
                         val status = result?.optInt("status", 0) ?: 0
-                        val bytes = result?.optString("responseText")?.length ?: result?.optString("base64")?.length ?: 0
-                        DebugLog.event("gm-xhr", "event=$kind status=$status bytes=$bytes url=${DebugLog.safeUrl(address)} ok=${error == null} error=${error.orEmpty().take(180)}")
+                        DebugLog.event("gm-xhr", "event=$kind status=$status url=${DebugLog.safeUrl(address)} ok=${error == null} error=${error.orEmpty().take(180)}")
                         handler.post {
                             if (alive && sessions[doc] === session) {
                                 val response = JSONObject().put("doc", doc).put("id", id).put("event", kind)
@@ -197,9 +384,20 @@ class UserScriptHost(
                 }
             } catch (error: Exception) { log("error", error.message.orEmpty()); respond(error = error.message ?: "GM 调用失败") }
         }
-        if (!meta.isUserscript) return WebViewCompat.addDocumentStartJavaScript(view, bundle.source + "\n//# sourceURL=lightboat-userscript.js", setOf("*"))
         val (matcher, runtime) = UserScriptAssets.load(activity)
-        return WebViewCompat.addDocumentStartJavaScript(view, bundle.bootstrap("$matcher\n$runtime", token, profile.scriptUrl), setOf("*"))
+        val source = if (meta.isUserscript) bundle.bootstrap("$matcher\n$runtime", token, script.url, bridgeName, consoleSource)
+            else "delete window[${JSONObject.quote(bridgeName)}];\n" + bundle.source + "\n;\nwindow[${JSONObject.quote(bridgeName + "_initialized")}]=true;\n//# sourceURL=$consoleSource"
+        val installed = mutableListOf<ScriptHandler>()
+        try {
+            // Chromium can attribute parse errors to the page instead of sourceURL.
+            // A separate source observes initialization without eval or changing raw JS scope.
+            installed += WebViewCompat.addDocumentStartJavaScript(view, bundle.initializationCheck(matcher, token, bridgeName), setOf("*"))
+            installed += WebViewCompat.addDocumentStartJavaScript(view, source, setOf("*"))
+            return installed
+        } catch (error: Exception) {
+            installed.forEach { runCatching { it.remove() } }
+            throw error
+        }
     }
 
     fun invoke(menu: Menu) {
@@ -210,14 +408,26 @@ class UserScriptHost(
     }
 
     private fun dispose(doc: String) {
-        sessions.remove(doc)
-        commands.keys.filter { it.startsWith("$doc:") }.forEach { commands.remove(it) }
+        sessions.remove(doc)?.let { session ->
+            session.closed = true
+            session.transport.close()
+            ScriptStorage.cleanup { session.upload?.close(); session.upload = null; session.uploadId = null }
+        }
+        val removed = commands.keys.removeAll { it.startsWith("$doc:") }
+        if (removed) commandsChanged()
         network.abortDocument(doc)
     }
 
     fun resetDocuments() { sessions.keys.toList().forEach { dispose(it) } }
 
-    fun close() { alive = false; network.close(); sessions.clear(); commands.clear(); handler.removeCallbacksAndMessages(null) }
+    fun close() {
+        alive = false
+        network.close()
+        sessions.keys.toList().forEach(::dispose)
+        commands.clear(); commandsChanged(); commandListeners.clear(); handler.removeCallbacksAndMessages(null)
+        runCatching { WebViewCompat.removeWebMessageListener(view, bridgeName) }
+        ScriptStorage.releaseValueStore(storeLease)
+    }
 
     private fun sameOrigin(uri: URI, origin: Uri): Boolean {
         val uriPort = if (uri.port >= 0) uri.port else if (uri.scheme == "https") 443 else 80

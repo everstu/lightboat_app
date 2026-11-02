@@ -1,17 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ink">#142B28</color>
-    <color name="muted">#62716C</color>
-    <color name="accent">#176B55</color>
-    <color name="paper">#F5F6F0</color>
+    <!-- Lake teal palette: one hue for actions, neutral surfaces, tonal fills instead of outlines. -->
+    <color name="ink">#18211F</color>
+    <color name="muted">#64716D</color>
+    <color name="accent">#0D7468</color>
+    <color name="accent_container">#DDEFEA</color>
+    <color name="on_accent_container">#08544B</color>
+    <color name="accent_ripple">#1F0D7468</color>
+    <color name="paper">#F3F5F4</color>
     <color name="white">#FFFFFF</color>
-    <color name="line">#DAE1D7</color>
-    <color name="error">#AC3535</color>
-    <color name="log_badge">#E3EFE7</color>
-    <color name="log_warning">#966217</color>
-    <color name="log_paused_badge">#F8EDD8</color>
-    <color name="config_soft">#E8EFE8</color>
-    <color name="config_selected">#EEF5EF</color>
-    <color name="category_badge_fill">#EDF0FA</color>
-    <color name="category_badge_ink">#4D6090</color>
+    <color name="field">#EEF2F1</color>
+    <color name="line">#E0E6E3</color>
+    <color name="error">#BE3A2E</color>
+    <color name="error_container">#FBEBE8</color>
+    <color name="error_ripple">#24BE3A2E</color>
+    <color name="floating_secondary">#2B3A36</color>
+    <color name="log_badge">#DDEFEA</color>
+    <color name="log_warning">#985F0B</color>
+    <color name="log_paused_badge">#FAEEDB</color>
+    <color name="config_soft">#EBF1EF</color>
+    <color name="config_selected">#F1F8F6</color>
+    <color name="script_usage_stroke">#B5D8CF</color>
+    <color name="script_usage_zero_fill">#F0F2F3</color>
+    <color name="category_badge_fill">#ECEFF7</color>
+    <color name="category_badge_ink">#46588A</color>
 </resources>

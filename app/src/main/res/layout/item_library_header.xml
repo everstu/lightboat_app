@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:paddingBottom="@dimen/ui_item_gap">
+    <TextView android:id="@+id/libraryHelp" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/script_library_help" android:textColor="@color/muted"
+        android:textSize="13sp" android:lineSpacingExtra="3dp" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_item_gap">
+        <Button android:id="@+id/newLibraryScript" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:paddingHorizontal="12dp"
+            android:textSize="13sp" android:singleLine="true" android:text="@string/script_new" />
+        <Button android:id="@+id/batchAddLibraryScripts" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:layout_marginStart="@dimen/ui_item_gap" android:paddingHorizontal="12dp"
+            android:textSize="13sp" android:singleLine="true" android:text="@string/script_batch_add" />
+    </LinearLayout>
+    <TextView android:id="@+id/emptyScriptLibrary" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ui_item_gap" android:text="@string/script_library_empty" android:textColor="@color/muted" />
+</LinearLayout>

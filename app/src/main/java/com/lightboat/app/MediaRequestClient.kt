@@ -17,32 +17,61 @@ internal class MediaRequestClient(
     private val userAgent: String,
     private val cookies: (String) -> String? = { null },
     private val saveCookie: (String, String) -> Unit = { _, _ -> },
+    private val addresses: MediaAddressPolicy = MediaAddressPolicy(),
 ) {
+    private class CookieAccess(val allowed: Boolean) { var usedCredentials = false }
     private val calls = ConcurrentHashMap.newKeySet<Call>()
     private val sequence = AtomicLong()
     @Volatile private var closed = false
     private val client = OkHttpClient.Builder()
+        .dns(addresses.dns)
+        .followRedirects(false).followSslRedirects(false)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .addNetworkInterceptor { chain ->
             val current = chain.request()
             val url = current.url.toString()
-            val cookie = cookies(url)
+            val access = current.tag(CookieAccess::class.java)
+            val cookieAccess = access?.allowed != false
+            val cookie = if (cookieAccess) cookies(url) else null
+            access?.usedCredentials = !cookie.isNullOrEmpty() || current.header("Authorization") != null
             val request = current.newBuilder().header("User-Agent", userAgent)
                 .removeHeader("X-Requested-With").removeHeader("Cookie")
             cookie?.let { request.header("Cookie", it) }
             DebugLog.event("media-upstream",
                 "${current.method} ${DebugLog.safeUrl(url)} ua=${userAgent.take(300)} hasCookie=${!cookie.isNullOrBlank()} range=${current.header("Range").orEmpty()}")
             val response = chain.proceed(request.build())
-            response.headers("Set-Cookie").forEach { saveCookie(url, it) }
+            if (cookieAccess) response.headers("Set-Cookie").forEach { saveCookie(url, it) }
             DebugLog.event("media-upstream",
                 "status=${response.code} type=${response.header("Content-Type").orEmpty()} length=${response.header("Content-Length").orEmpty()} url=${DebugLog.safeUrl(url)}")
             response
         }.build()
 
-    fun execute(url: String, method: String, headers: Map<String, String>): Response {
+    fun usedCredentials(response: Response) = response.request.tag(CookieAccess::class.java)?.usedCredentials == true
+
+    fun execute(url: String, method: String, headers: Map<String, String>, cookieOrigin: String? = null): Response {
+        var target = Request.Builder().url(url).build().url
+        val origin = cookieOrigin?.let { Request.Builder().url(it).build().url }
+        var forwarded = headers
+        repeat(11) { redirects ->
+            addresses.check(target)
+            val cookieAccess = origin == null || origin.scheme == target.scheme && origin.host == target.host && origin.port == target.port
+            val response = executeOnce(target.toString(), method, forwarded, cookieAccess)
+            if (response.code !in setOf(301, 302, 303, 307, 308)) return response
+            val next = response.header("Location")?.let { target.resolve(it) } ?: return response
+            response.close()
+            check(redirects < 10) { "Too many media redirects" }
+            if (next.scheme != target.scheme || next.host != target.host || next.port != target.port) {
+                forwarded = forwarded.filterKeys { it.lowercase() !in setOf("authorization", "proxy-authorization") }
+            }
+            target = next
+        }
+        error("Too many media redirects")
+    }
+
+    private fun executeOnce(url: String, method: String, headers: Map<String, String>, cookieAccess: Boolean): Response {
         check(!closed) { "媒体会话已结束" }
-        val request = Request.Builder().url(url).method(method, null)
+        val request = Request.Builder().url(url).method(method, null).tag(CookieAccess::class.java, CookieAccess(cookieAccess))
         headers.forEach { (name, value) ->
             if (name.lowercase() !in setOf("host", "connection", "content-length", "transfer-encoding",
                     "accept-encoding", "cookie", "user-agent", "x-requested-with", "proxy-authorization")) {
@@ -104,9 +133,9 @@ internal class MediaRequestClient(
 
     fun close() {
         closed = true
-        calls.forEach { it.cancel() }
+        val active = calls.toList()
         calls.clear()
-        client.connectionPool.evictAll()
+        HttpClientCleanup.close(client, active)
     }
 
     private fun category(bytes: ByteArray): String {

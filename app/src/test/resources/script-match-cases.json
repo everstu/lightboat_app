@@ -1,0 +1,20 @@
+[
+  {"meta":{"match":["https://example.com:443/*"]},"url":"https://example.com/page","expected":true},
+  {"meta":{"match":["https://example.com:443/*"]},"url":"https://EXAMPLE.com:443/page#part","expected":true},
+  {"meta":{"match":["http://*.example.com:80/*"]},"url":"http://sub.example.com/page","expected":true},
+  {"meta":{"match":["https://*.example.com:443/*"]},"url":"https://sub.example.com:8443/page","expected":false},
+  {"meta":{"match":["https://example.com/*"]},"url":"https://example.com:8443/page","expected":true},
+  {"meta":{"match":["https://example.com/watch?x=1"]},"url":"HTTPS://EXAMPLE.COM/a/../watch?x=1#x","expected":true},
+  {"meta":{"match":["https://example.com/watch*"]},"url":"https://example.com/a/%2e%2e/watch?q=2","expected":true},
+  {"meta":{"include":["https://example.com/watch*"]},"url":"https://example.com:443/a/../watch#part","expected":true},
+  {"meta":{"match":["https://例子.中国/*"]},"url":"https://例子.中国/路径","expected":true},
+  {"meta":{"match":["https://xn--fsqu00a.xn--fiqs8s/*"]},"url":"https://例子.中国/路径","expected":true},
+  {"meta":{"match":["https://[::1]:443/*"]},"url":"https://[::1]/page","expected":true},
+  {"meta":{"match":["*://*.example.com/*"]},"url":"https://evil-example.com/","expected":false},
+  {"meta":{"match":["https://example.com/*"],"exclude-match":["https://example.com:443/private*"]},"url":"https://example.com/private?a=1","expected":false},
+  {"meta":{"match":["https://example.com/*"],"exclude":["*private*"]},"url":"https://example.com/a/../private#ok","expected":false},
+  {"meta":{"match":["*://*/*"]},"url":"file:///tmp/page","expected":false},
+  {"meta":{},"url":"about:blank","expected":false},
+  {"meta":{"match":["https://example.com/WATCH*"]},"url":"https://example.com/watch","expected":false},
+  {"meta":{"include":["/example\\.com\\/watch/"]},"url":"https://example.com/a/../watch#part","expected":true}
+]

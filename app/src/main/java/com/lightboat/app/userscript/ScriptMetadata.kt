@@ -3,6 +3,7 @@ package com.lightboat.app.userscript
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 data class ScriptMetadata(val directives: Map<String, List<String>>, val header: String) {
     val isUserscript get() = header.isNotEmpty()
@@ -24,9 +25,8 @@ data class ScriptMetadata(val directives: Map<String, List<String>>, val header:
     fun permits(api: String) = api in grants && "none" !in grants
 
     fun matchesPage(address: String): Boolean {
-        val uri = runCatching { URI(address) }.getOrNull() ?: return false
-        if (uri.scheme !in listOf("http", "https") || uri.host == null) return false
-        val withoutHash = address.substringBefore('#')
+        val uri = address.toHttpUrlOrNull() ?: return false
+        val withoutHash = uri.newBuilder().fragment(null).build().toString()
         fun glob(pattern: String, text: String): Boolean = pattern.split('*').joinToString(".*") { Regex.escape(it) }
             .let { Regex("^$it$").matches(text) }
         fun include(pattern: String): Boolean {
@@ -39,12 +39,13 @@ data class ScriptMetadata(val directives: Map<String, List<String>>, val header:
             val rule = Regex("^(\\*|http\\*|https?)://([^/]+)(/.*)$").matchEntire(pattern) ?: return false
             val (scheme, domain, path) = rule.destructured
             if (scheme !in listOf("*", "http*") && scheme != uri.scheme) return false
-            val host = uri.host.lowercase()
-            val hostname = domain.lowercase()
-            val authority = if (uri.port >= 0) "$host:${uri.port}" else host
-            val allowed = hostname == "*" || hostname == host || hostname == authority ||
-                (hostname.startsWith("*.") && (host == hostname.substring(2) || host.endsWith("." + hostname.substring(2))))
-            return allowed && glob(path, (uri.rawPath.ifEmpty { "/" }) + (uri.rawQuery?.let { "?$it" } ?: ""))
+            val authority = Regex("^(\\*\\.)?(\\[[^]]+]|[^:]+)(?::([0-9]+))?$").matchEntire(domain) ?: return false
+            val (_, rawHost, port) = authority.destructured
+            if (port.isNotEmpty() && port.toIntOrNull() != uri.port) return false
+            val hostname = if (rawHost == "*") "*" else ("http://$rawHost/").toHttpUrlOrNull()?.host ?: return false
+            val allowed = hostname == "*" || hostname == uri.host ||
+                (authority.groupValues[1].isNotEmpty() && uri.host.endsWith(".$hostname"))
+            return allowed && glob(path, uri.encodedPath + (uri.encodedQuery?.let { "?$it" } ?: ""))
         }
         val allowed = (all("match").isEmpty() && all("include").isEmpty()) || all("match").any { match(it) } || all("include").any { include(it) }
         return allowed && !all("exclude").any { include(it) } && !all("exclude-match").any { match(it) }

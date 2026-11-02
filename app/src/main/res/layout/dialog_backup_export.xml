@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent"
+    android:layout_height="wrap_content" android:padding="@dimen/ui_page_inset" android:orientation="vertical" android:background="@drawable/bg_config_dialog">
+    <ScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_weight="1">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/backup_export_title"
+        android:textColor="@color/ink" android:textSize="@dimen/ui_dialog_title" android:textStyle="bold" />
+    <TextView android:id="@+id/backupExportFeedback" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/ui_item_gap" android:text="@string/backup_export_description" android:textColor="@color/muted"
+        android:textSize="13sp" android:lineSpacingExtra="4dp" android:accessibilityLiveRegion="polite" />
+    <com.lightboat.app.BackupOptionsView android:id="@+id/backupExportOptions" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_section_gap" />
+    </LinearLayout>
+    </ScrollView>
+    <ProgressBar android:id="@+id/backupExportProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent"
+        android:layout_height="3dp" android:layout_marginTop="@dimen/ui_item_gap" android:indeterminate="true" android:visibility="gone" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="@dimen/ui_section_gap">
+        <Button android:id="@+id/backupExportCancel" style="@style/ConfigSecondary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:text="@string/import_cancel" />
+        <Button android:id="@+id/backupExportAction" style="@style/ConfigPrimary" android:layout_width="0dp" android:layout_weight="1"
+            android:layout_height="wrap_content" android:minHeight="@dimen/ui_touch_target" android:layout_marginStart="@dimen/ui_item_gap" android:text="@string/backup_export_action" android:textSize="13sp" />
+    </LinearLayout>
+</LinearLayout>

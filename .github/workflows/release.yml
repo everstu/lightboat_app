@@ -59,10 +59,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Lightboat ${{ github.ref_name }}
-          generate_release_notes: true
-          body: |
-            Android debug APK. Uses the fixed repository debug certificate for upgrade installation; no signing secrets are required.
-            Android 8.0 or later and a WebView supporting document-start injection are required.
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: release-assets/*.apk
           fail_on_unmatched_files: true
       - name: Upload check reports

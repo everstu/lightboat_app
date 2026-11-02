@@ -2,14 +2,16 @@ package com.lightboat.app
 
 import android.content.Context
 import android.os.Process
+import android.util.AtomicFile
 import java.io.File
 import java.io.PrintWriter
-import java.io.RandomAccessFile
 import java.io.StringWriter
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * One process-scoped diagnostic log. It is cleared once when a new app process
@@ -17,16 +19,30 @@ import java.util.Locale
  * Sensitive header values and URL query values are intentionally omitted.
  */
 object DebugLog {
-    private const val MAX_BYTES = 1_048_576L
-    private const val KEEP_BYTES = 524_288
+    internal const val MAX_ENTRIES = 2000
+    private const val WRITE_INTERVAL_MS = 2000L
     private val lock = Any()
+    private val diskLock = Any()
+    private val buffer = DebugLogBuffer(MAX_ENTRIES)
+    private val writer = Executors.newSingleThreadScheduledExecutor { task -> Thread(task, "debug-log-writer").apply { isDaemon = true } }
+    private var writeScheduled = false
+    private val urlPattern = Regex("https?://[^\\s\\\"']+", RegexOption.IGNORE_CASE)
+    // Header values may contain spaces, commas or semicolons; redact the full line.
+    private val secretPattern = Regex("(?i)\\b((?:proxy-)?authorization|(?:set-)?cookie)[\"']?\\s*[:=][^\\r\\n]*")
+    private val bearerPattern = Regex("(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+")
+    private val controlPattern = Regex("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]")
     private val clock = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private var file: File? = null
     private var initialized = false
     private var generation = 0L
+    private var revision = 0L
+    private var persistedRevision = -1L
+    private data class Snapshot(val file: File, val revision: Long, val lines: List<String>)
 
     internal data class Cursor(val generation: Long, val offset: Long)
-    internal data class Update(val cursor: Cursor, val reset: Boolean, val text: String)
+    internal data class Update(val cursor: Cursor, val reset: Boolean, val lines: List<String>) {
+        val text get() = lines.joinToString("\n", postfix = if (lines.isEmpty()) "" else "\n")
+    }
 
     fun initialize(context: Context) {
         val app = context.applicationContext
@@ -35,17 +51,19 @@ object DebugLog {
         synchronized(lock) {
             if (initialized) return
             file = File(app.filesDir, "debug.log")
-            runCatching { file!!.writeText("", Charsets.UTF_8) }
+            revision++
             initialized = true
             previousCrash = preferences.getString("previous-crash", null)
             preferences.edit().remove("previous-crash").apply()
         }
+        flush()
         event("app", "process started")
         previousCrash?.let { event("previous-crash", it) }
         val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
-            val trace = StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString().take(16_000)
+            val trace = sanitize(StringWriter().also { error.printStackTrace(PrintWriter(it)) }.toString()).take(16_000)
             event("crash", "thread=${thread.name} $trace")
+            flush()
             preferences.edit().putString("previous-crash", "thread=${thread.name} $trace").commit()
             if (previousHandler != null) previousHandler.uncaughtException(thread, error) else {
                 Process.killProcess(Process.myPid())
@@ -55,51 +73,62 @@ object DebugLog {
 
     fun event(area: String, message: String) {
         synchronized(lock) {
-            val target = file ?: return
-            val clean = message.replace(Regex("https?://[^\\s\\\"']+", RegexOption.IGNORE_CASE)) {
-                    safeUrl(it.value)
-                }
-                .replace(Regex("(?i)\\b(authorization|cookie)\\s*[:=]\\s*[^\\s,;]+")) {
-                    "${it.groupValues[1]}=<redacted>"
-                }
-                .replace(Regex("(?i)\\bBearer\\s+[A-Za-z0-9._~+/=-]+"), "Bearer <redacted>")
-                .replace(Regex("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]"), " ")
-                .replace('\n', ' ').replace('\r', ' ').take(4000)
-            val line = "${clock.format(Date())} [$area] $clean\n"
-            runCatching {
-                if (target.length() > MAX_BYTES) {
-                    val current = target.readBytes()
-                    val tail = current.copyOfRange((current.size - KEEP_BYTES).coerceAtLeast(0), current.size)
-                    val firstLineEnd = tail.indexOf('\n'.code.toByte())
-                    val completeLines = if (firstLineEnd >= 0) tail.copyOfRange(firstLineEnd + 1, tail.size) else tail
-                    target.writeBytes("--- log trimmed ---\n".toByteArray(Charsets.UTF_8) + completeLines)
-                    generation++
-                }
-                target.appendText(line, Charsets.UTF_8)
+            if (file == null) return
+            val clean = sanitize(message).take(4000)
+            buffer.append("${clock.format(Date())} [$area] $clean")
+            revision++
+            if (!writeScheduled) {
+                writeScheduled = true
+                writer.schedule({
+                    synchronized(lock) { writeScheduled = false }
+                    writeFile()
+                }, WRITE_INTERVAL_MS, TimeUnit.MILLISECONDS)
             }
         }
     }
 
+    internal fun sanitize(message: String): String = message.replace(urlPattern) { safeUrl(it.value) }
+        .replace(secretPattern) { "${it.groupValues[1]}=<redacted>" }
+        .replace(bearerPattern, "Bearer <redacted>")
+        .replace(controlPattern, " ")
+        .replace('\n', ' ').replace('\r', ' ')
+
     internal fun readAfter(cursor: Cursor?): Update = synchronized(lock) {
-        val target = file?.takeIf { it.exists() }
-        val size = target?.length() ?: 0L
-        val reset = cursor == null || cursor.generation != generation || cursor.offset > size
-        val offset = if (reset) 0L else cursor!!.offset
-        val text = if (target != null && size > offset) {
-            RandomAccessFile(target, "r").use { input ->
-                input.seek(offset)
-                val bytes = ByteArray((size - offset).toInt())
-                input.readFully(bytes)
-                bytes.toString(Charsets.UTF_8)
-            }
-        } else ""
-        Update(Cursor(generation, size), reset, text)
+        val update = buffer.read(cursor?.takeIf { it.generation == generation }?.offset)
+        Update(Cursor(generation, update.sequence), update.reset, update.lines)
     }
 
-    internal fun clear(): Unit = synchronized(lock) {
-        file?.writeText("", Charsets.UTF_8)
-        generation++
-        Unit
+    internal fun clear() {
+        synchronized(lock) {
+            buffer.clear()
+            generation++
+            revision++
+        }
+        writeFile()
+    }
+
+    internal fun flush() = writeFile()
+
+    private fun writeFile() {
+        // Serialize disk writes separately. Logging and live UI reads never wait for fsync.
+        synchronized(diskLock) {
+            val snapshot = synchronized(lock) {
+                val target = file ?: return
+                if (revision == persistedRevision) return
+                Snapshot(target, revision, buffer.read(null).lines)
+            }
+            val atomic = AtomicFile(snapshot.file)
+            val saved = runCatching {
+                val output = atomic.startWrite()
+                try {
+                    val text = output.bufferedWriter(Charsets.UTF_8)
+                    snapshot.lines.forEach { text.append(it).append('\n') }
+                    text.flush()
+                    atomic.finishWrite(output)
+                } catch (error: Exception) { atomic.failWrite(output); throw error }
+            }.isSuccess
+            if (saved) synchronized(lock) { persistedRevision = snapshot.revision }
+        }
     }
 
     fun safeUrl(value: String?): String {

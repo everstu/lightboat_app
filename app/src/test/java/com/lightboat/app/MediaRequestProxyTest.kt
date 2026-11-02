@@ -14,6 +14,87 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MediaRequestProxyTest {
+    @Test fun hlsKeyWithKeynoteMimeRetainsItsSixteenBytesAndRange() {
+        MockWebServer().use { server ->
+            val key = ByteArray(16) { (it * 17).toByte() }
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest) = if (request.path == "/master.m3u8") {
+                    MockResponse().setHeader("Content-Type", "application/vnd.apple.mpegurl")
+                        .setBody("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"/api/app/vid/sec\"\n#EXTINF:5,\nsegment.ts\n")
+                } else MockResponse().setResponseCode(206)
+                    .setHeader("Content-Type", "application/vnd.apple.keynote")
+                    .setHeader("Content-Range", "bytes 0-15/16").setBody(Buffer().write(key))
+            }
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
+            val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
+            proxy.start()
+            try {
+                val browser = OkHttpClient.Builder().callTimeout(3, TimeUnit.SECONDS).build()
+                val keyUrl = proxy.url(server.url("/api/app/vid/sec").toString(), "https://page.example/watch")
+                val manifest = browser.newCall(Request.Builder()
+                    .url(proxy.url(server.url("/master.m3u8").toString(), "https://page.example/watch"))
+                    .build()).execute().use { assertEquals(200, it.code); it.body!!.string() }
+                assertTrue(manifest.contains("URI=\"$keyUrl\""))
+                browser.newCall(Request.Builder().url(keyUrl).header("Range", "bytes=0-").build()).execute().use {
+                    assertEquals(206, it.code)
+                    assertEquals("application/octet-stream", it.header("Content-Type"))
+                    assertEquals("bytes 0-15/16", it.header("Content-Range"))
+                    assertArrayEquals(key, it.body!!.bytes())
+                }
+                assertNull(server.takeRequest(1, TimeUnit.SECONDS)?.getHeader("Range"))
+                assertEquals("bytes=0-", server.takeRequest(1, TimeUnit.SECONDS)?.getHeader("Range"))
+            } finally { proxy.close(); network.close() }
+        }
+    }
+
+    @Test fun encryptedHlsSegmentsWithQtMimeRetainEveryByte() {
+        MockWebServer().use { server ->
+            val encrypted = ByteArray(512) { (it * 31 + 193).toByte() }
+            val types = listOf("text/vnd.qt.linguist; charset=utf-8", "text/vnd.trolltech.linguist; charset=utf-8")
+            types.forEach { type -> server.enqueue(MockResponse().setResponseCode(206)
+                .setHeader("Content-Type", type).setHeader("Content-Range", "bytes 0-511/512")
+                .setBody(Buffer().write(encrypted))) }
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
+            val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
+            proxy.start()
+            try {
+                val browser = OkHttpClient.Builder().callTimeout(3, TimeUnit.SECONDS).build()
+                types.forEach {
+                    browser.newCall(Request.Builder()
+                        .url(proxy.url(server.url("/segment.ts?md=signed").toString(), "https://page.example/watch"))
+                        .header("Range", "bytes=0-").build()).execute().use {
+                        assertEquals(206, it.code)
+                        assertEquals("application/octet-stream", it.header("Content-Type"))
+                        assertEquals("bytes 0-511/512", it.header("Content-Range"))
+                        assertArrayEquals(encrypted, it.body!!.bytes())
+                    }
+                }
+            } finally { proxy.close(); network.close() }
+        }
+    }
+
+    @Test fun documentMimeCompatibilityDoesNotAcceptOtherDocuments() {
+        MockWebServer().use { server ->
+            val types = listOf("application/vnd.apple.keynote", "text/vnd.qt.linguist", "text/vnd.trolltech.linguist")
+            types.forEach { type -> server.enqueue(MockResponse().setHeader("Content-Type", type)
+                .setBody("private document content")) }
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
+            val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
+            proxy.start()
+            try {
+                val browser = OkHttpClient.Builder().callTimeout(3, TimeUnit.SECONDS).build()
+                types.forEach {
+                    browser.newCall(Request.Builder()
+                        .url(proxy.url(server.url("/document").toString(), "https://page.example/watch"))
+                        .build()).execute().use {
+                        assertEquals(502, it.code)
+                        assertFalse(it.body!!.string().contains("private document"))
+                    }
+                }
+            } finally { proxy.close(); network.close() }
+        }
+    }
+
     @Test fun nativeHlsKeepsProfileContextForManifestKeySegmentAndRedirect() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n#EXTINF:5,\nsegment.ts\n")
@@ -24,7 +105,8 @@ class MediaRequestProxyTest {
                 .setHeader("Content-Range", "bytes 0-10/100").setHeader("Accept-Ranges", "bytes"))
             val cookie = AtomicReference("session=initial")
             val ua = "Configured Android UA"
-            val network = MediaRequestClient(ua, { cookie.get() }, { _, value -> cookie.set(value.substringBefore(';')) })
+            val network = MediaRequestClient(ua, { cookie.get() }, { _, value -> cookie.set(value.substringBefore(';')) },
+                MediaAddressPolicy(allowPrivateForTests = true))
             val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
@@ -56,7 +138,7 @@ class MediaRequestProxyTest {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4")
                 .setHeader("Content-Length", "321").setHeader("Accept-Ranges", "bytes"))
-            val network = MediaRequestClient("Configured UA")
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
             val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
@@ -75,7 +157,7 @@ class MediaRequestProxyTest {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("#EXTM3U\n#EXTINF:5,\nsegment.ts\n")
                 .setHeader("Content-Type", "application/vnd.apple.mpegurl"))
-            val network = MediaRequestClient("Configured UA")
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
             val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
@@ -102,7 +184,7 @@ class MediaRequestProxyTest {
                 .setHeader("Content-Type", "application/vnd.apple.mpegurl"))
             server.enqueue(MockResponse().setBody("#EXTM3U\n#EXTINF:5,\nsegment.ts\n")
                 .setHeader("Content-Type", "application/vnd.apple.mpegurl"))
-            val network = MediaRequestClient("Configured UA")
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
             val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
@@ -133,7 +215,7 @@ class MediaRequestProxyTest {
                     "#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin?x=1&y=2\"\r\n#EXTINF:5,\r\npart.ts\r\n")
                     .setHeader("Content-Type", "text/plain; charset=utf-8").setHeader("ETag", "original")
             }
-            val network = MediaRequestClient("Configured UA")
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
             val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
@@ -160,7 +242,7 @@ class MediaRequestProxyTest {
                 .setHeader("Content-Type", "application/octet-stream"))
             server.enqueue(MockResponse().setBody("#EXTM3U\n#EXTINF:5,\npart.ts\n")
                 .setHeader("Content-Type", "application/octet-stream"))
-            val network = MediaRequestClient("Configured UA")
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
             val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
@@ -180,7 +262,7 @@ class MediaRequestProxyTest {
     @Test fun detectedHlsRedirectGivesAndroidAParserHintWithoutCaching() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("#EXTM3U\n#EXTINF:5,\npart.ts\n").setHeader("Content-Type", "text/plain"))
-            val network = MediaRequestClient("Configured UA")
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
             val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
@@ -204,7 +286,7 @@ class MediaRequestProxyTest {
             server.enqueue(MockResponse().setResponseCode(206).setBody(Buffer().write(bytes))
                 .setHeader("Content-Type", "application/octet-stream")
                 .setHeader("Content-Range", "bytes 0-${bytes.size - 1}/1000"))
-            val network = MediaRequestClient("Configured UA")
+            val network = MediaRequestClient("Configured UA", addresses = MediaAddressPolicy(allowPrivateForTests = true))
             val proxy = MediaRequestProxy(network, allowLoopbackUpstreamForTests = true)
             proxy.start()
             try {
@@ -247,7 +329,7 @@ class MediaRequestProxyTest {
             val saved = mutableListOf<Pair<String, String>>()
             val network = MediaRequestClient("Configured UA", {
                 if (java.net.URI(it).host == "localhost") "first=initial" else "second=initial"
-            }, { url, cookie -> saved += java.net.URI(url).host to cookie })
+            }, { url, cookie -> saved += java.net.URI(url).host to cookie }, MediaAddressPolicy(allowPrivateForTests = true))
             try {
                 network.execute(first.url("/start").newBuilder().host("localhost").build().toString(), "GET", emptyMap()).use {
                     assertEquals("video", it.body!!.string())

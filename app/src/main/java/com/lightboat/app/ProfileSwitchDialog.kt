@@ -2,7 +2,9 @@ package com.lightboat.app
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -26,13 +28,13 @@ internal class ProfileSwitchDialog(
     private val config: AppConfig,
     private val currentId: String?,
     private val open: (Profile) -> Unit,
-    initialCategoryId: String?,
-    private val categoryChanged: (String?) -> Unit,
+    initialFilter: ProfileFilter,
+    private val filterChanged: (ProfileFilter) -> Unit,
 ) : AppCompatDialog(activity, R.style.Theme_Lightboat_ActionDialog), ResponsiveDialog {
     private val binding = DialogSwitchProfileBinding.inflate(activity.layoutInflater)
     private val entries = SwitchAdapter { profile -> dismiss(); open(profile) }
     private val profiles get() = config.profiles
-    private var filter = ProfileFilter(initialCategoryId).resolve(config)
+    private var filter = initialFilter.resolve(config)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,7 +70,7 @@ internal class ProfileSwitchDialog(
 
     private fun changeFilter(next: ProfileFilter) {
         filter = next.resolve(config)
-        categoryChanged(filter.categoryId)
+        filterChanged(filter)
         refreshProfiles()
         binding.switchList.scrollToPosition(0)
     }
@@ -98,11 +100,12 @@ internal class ProfileSwitchDialog(
         binding.switchSummary.visibility = if (compact) View.GONE else View.VISIBLE
         binding.startupNote.visibility = if (compact) View.GONE else View.VISIBLE
         val density = context.resources.displayMetrics.density
-        binding.root.setPadding(0, ((if (compact) 12 else 20) * density).toInt(), 0, 0)
-        binding.switchFooter.setPadding((20 * density).toInt(), ((if (compact) 8 else 12) * density).toInt(),
-            (20 * density).toInt(), ((if (compact) 12 else 20) * density).toInt())
+        val side = context.resources.getDimensionPixelSize(R.dimen.ui_page_inset)
+        binding.root.setPadding(0, ((if (compact) 8 else 12) * density).toInt(), 0, 0)
+        binding.switchFooter.setPadding(side, ((if (compact) 4 else 8) * density).toInt(),
+            side, ((if (compact) 8 else 12) * density).toInt())
         entries.setCompact(compact)
-        val width = minOf(context.resources.displayMetrics.widthPixels - (32 * density).toInt(), (560 * density).toInt())
+        val width = DialogLayout.width(context, maxWidthDp = 560, marginDp = 32)
         val safeInsets = ViewCompat.getRootWindowInsets(activity.window.decorView)
             ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
         val safeHeight = activity.resources.displayMetrics.heightPixels -
@@ -138,8 +141,16 @@ internal class ProfileSwitchDialog(
         }
 
         override fun getItemCount() = visible.size
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) =
-            Holder(ItemSwitchProfileBinding.inflate(LayoutInflater.from(parent.context), parent, false))
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+            val row = ItemSwitchProfileBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+            // Match the profile manager's corner tag: clipped by the rounded row, translucent
+            // accent fill and a fixed compact label size that does not grow the toolbar area.
+            row.root.clipToOutline = true
+            row.profileState.background.mutate().alpha = 96
+            row.profileState.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11f)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) row.profileState.setFallbackLineSpacing(false)
+            return Holder(row)
+        }
 
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val profile = visible[position]
@@ -154,22 +165,37 @@ internal class ProfileSwitchDialog(
             row.root.isActivated = current
             row.root.isSelected = current
             val density = context.resources.displayMetrics.density
-            val verticalPadding = ((if (compactRows) 12 else 16) * density).toInt()
-            row.root.setPadding((16 * density).toInt(), verticalPadding, (16 * density).toInt(), verticalPadding)
-            row.root.minimumHeight = ((if (compactRows) 72 else 96) * density).toInt()
-            row.profileMeta.visibility = if (compactRows) View.GONE else View.VISIBLE
+            val verticalPadding = ((if (compactRows) 8 else 12) * density).toInt()
+            val horizontal = context.resources.getDimensionPixelSize(R.dimen.ui_field_inset)
+            row.profileContent.setPadding(horizontal, verticalPadding, horizontal, verticalPadding)
+            row.profileContent.minimumHeight = ((if (compactRows) 64 else 80) * density).toInt()
+            row.profilePlatform.visibility = if (compactRows) View.GONE else View.VISIBLE
             row.profileInitial.text = profile.name.substring(0, profile.name.offsetByCodePoints(0, 1)).uppercase()
             row.profileName.text = profile.name
             row.profileHost.text = host
             val category = config.categories[profile.categoryId] ?: context.getString(R.string.category_none)
             row.profilePlatform.text = context.getString(R.string.profile_category_platform, platform, category)
             row.profileFavorite.visibility = if (profile.favorite) View.VISIBLE else View.GONE
-            row.profileState.setText(R.string.current_profile)
-            row.profileState.visibility = if (current) View.VISIBLE else View.GONE
+            val isDefault = profile.id == config.defaultProfileId
+            row.profileState.setText(R.string.default_profile)
+            row.profileState.visibility = if (isDefault) View.VISIBLE else View.GONE
+            // The floating tag sits above the trailing icons; keep long names clear of it.
+            val nameEnd = if (!isDefault) 0 else {
+                row.profileState.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+                val tagSpan = (row.profileState.layoutParams as ViewGroup.MarginLayoutParams).marginEnd +
+                    row.profileState.measuredWidth + (4 * density).toInt()
+                val trailing = horizontal + context.resources.getDimensionPixelSize(R.dimen.ui_item_gap) +
+                    ((if (profile.favorite) 22 + 8 + 18 else 22) * density).toInt()
+                (tagSpan - trailing).coerceAtLeast(0)
+            }
+            row.profileName.setPaddingRelative(0, 0, nameEnd, 0)
             row.profileIndicator.setImageResource(if (current) R.drawable.ic_check_circle else R.drawable.ic_chevron)
             row.root.contentDescription = context.getString(R.string.profile_switch_description, profile.name, host,
                 row.profilePlatform.text) + if (profile.favorite) context.getString(R.string.profile_favorite_suffix) else ""
-            ViewCompat.setStateDescription(row.root, if (current) context.getString(R.string.current_profile) else null)
+            ViewCompat.setStateDescription(row.root, listOfNotNull(
+                context.getString(R.string.menu_current_profile).takeIf { current },
+                context.getString(R.string.default_profile).takeIf { isDefault }
+            ).joinToString("，").ifEmpty { null })
             row.root.setOnClickListener { select(profile) }
         }
     }

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <declare-styleable name="ProfileFloatingActionButton">
+        <attr name="actionIcon" format="reference" />
+        <attr name="actionLabel" format="string" />
+        <attr name="actionCaption" format="string" />
+        <attr name="actionBackground" format="reference" />
+    </declare-styleable>
+</resources>
